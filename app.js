@@ -73,8 +73,29 @@ let session=null;try{session=JSON.parse(sessionStorage.getItem('qini-session')||
 let stockFilter='';
 const save=()=>{db.products=inventoryFromData({Deliveries:db.deliveries,Writeoffs:db.writeoffs,Sales:db.sales});localStorage.setItem('qini-db',JSON.stringify(db))},money=(n,c='GEL')=>`${Number(n||0).toLocaleString('ru-RU',{maximumFractionDigits:2})} ${CURRENCY[c]||'₾'}`,esc=(s='')=>String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])),el=s=>document.querySelector(s),fmtPct=n=>{const v=Number(n||0);if(!isFinite(v))return '0%';return Math.round(v)+'%'};
 function toast(x){const t=el('#toast');if(t){t.textContent=x;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2400)}}
-async function api(action,entity,data){if(!API_URL)return {ok:false,error:'API_URL не настроен'};try{const r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action,entity,data,token:session?.token||''})}),result=await r.json();if(!result.ok&&/сессия|session/i.test(result.error||'')){session=null;sessionStorage.removeItem('qini-session');toast('Сессия истекла. Войдите снова.');setTimeout(()=>render(),900)}return result}catch(e){return {ok:false,error:e.message}}}
-function login(){document.querySelector('#app').innerHTML=`<div class="login-page"><div class="login-card"><div class="brand login-brand"><div class="brand-mark">Q</div><div class="brand-text">qini</div></div><div class="login-kicker">УЧЁТ ПОСТАВОК</div><h1>С возвращением</h1><p>Войдите в рабочее пространство Qini</p><form id="loginForm"><label class="label">Логин</label><input class="input" name="login" autocomplete="username" placeholder="Введите логин" required><label class="label">Пароль</label><input class="input" type="password" name="password" autocomplete="current-password" placeholder="Введите пароль" required><button class="btn btn-primary login-button">Войти в Qini</button><div class="login-hint">Данные проверяются сервером Apps Script</div><div id="loginError" class="login-error"></div></form></div></div>`;el('#loginForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target),l=f.get('login'),p=f.get('password');if(API_URL){const r=await api('login',null,{login:l,password:p});if(r.ok){session=r.session;sessionStorage.setItem('qini-session',JSON.stringify(session));render();await sync()}else el('#loginError').textContent=r.error||'Неверный логин или пароль'}else{if(l===db.auth.login&&p===db.auth.password)session={role:'admin',name:db.auth.name};else{const u=db.users.find(x=>x.login===l&&x.password===p);if(u)session={role:'seller',name:u.name,userId:u.id,warehouses:u.warehouses}}if(session){sessionStorage.setItem('qini-session',JSON.stringify(session));render()}else el('#loginError').textContent='Укажите URL Apps Script'}}}
+// Безопасный парсер ответа — не падаем на HTML вместо JSON.
+function parseJsonResponse(text){
+  const t=String(text||'').trim();
+  if(!t)return {ok:false,error:'Сервер вернул пустой ответ. Проверьте деплой Apps Script (Who has access: Anyone).'};
+  if(t[0]==='<')return {ok:false,error:'Сервер вернул HTML вместо JSON. Проверьте, что URL оканчивается на /exec и в деплое стоит «Who has access: Anyone».'};
+  try{return JSON.parse(t)}catch(e){return {ok:false,error:'Некорректный ответ сервера: '+t.slice(0,120)}}
+}
+async function api(action,entity,data){
+  if(!API_URL)return {ok:false,error:'API_URL не настроен'};
+  let result;
+  try{
+    const r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action,entity,data,token:session?.token||''})});
+    const text=await r.text();
+    result=parseJsonResponse(text);
+  }catch(e){return {ok:false,error:'Сеть: '+e.message}}
+  if(!result.ok&&/сессия|session/i.test(result.error||'')){
+    session=null;sessionStorage.removeItem('qini-session');
+    toast('Сессия истекла. Войдите снова.');
+    setTimeout(()=>render(),900);
+  }
+  return result;
+}
+function login(){document.querySelector('#app').innerHTML=`<div class="login-page"><div class="login-card"><div class="brand login-brand"><div class="brand-mark">Q</div><div class="brand-text">qini</div></div><div class="login-kicker">УЧЁТ ПОСТАВОК</div><h1>С возвращением</h1><p>Войдите в рабочее пространство Qini</p><form id="loginForm"><label class="label">Логин</label><input class="input" name="login" autocomplete="username" placeholder="Введите логин" required><label class="label">Пароль</label><input class="input" type="password" name="password" autocomplete="current-password" placeholder="Введите пароль" required><button class="btn btn-primary login-button">Войти в Qini</button><div id="loginError" class="login-error"></div></form></div></div>`;el('#loginForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target),l=f.get('login'),p=f.get('password');if(API_URL){const r=await api('login',null,{login:l,password:p});if(r.ok){session=r.session;sessionStorage.setItem('qini-session',JSON.stringify(session));render();await sync()}else el('#loginError').textContent=r.error||'Неверный логин или пароль'}else{if(l===db.auth.login&&p===db.auth.password)session={role:'admin',name:db.auth.name};else{const u=db.users.find(x=>x.login===l&&x.password===p);if(u)session={role:'seller',name:u.name,userId:u.id,warehouses:u.warehouses}}if(session){sessionStorage.setItem('qini-session',JSON.stringify(session));render()}else el('#loginError').textContent='Укажите URL Apps Script'}}}
 const navA=[['overview','⌂','Обзор'],['sellers','♙','Продавцы'],['suppliers','♧','Поставщики'],['warehouses','▣','Склады'],['accounts','▤','Счета'],['deliveries','⇄','Поставки'],['writeoffs','↘','Списания'],['stock','◫','Остатки'],['stats','◔','Статистика']],navS=[['deliveries','⇄','Поставки'],['writeoffs','↘','Списания'],['stock','◫','Остатки'],['stats','◔','Статистика']],titles={overview:['Добрый день','Сводка по вашему бизнесу'],sellers:['Продавцы','Команда и доступ к складам'],suppliers:['Поставщики','Контакты и история сотрудничества'],warehouses:['Склады','Точки хранения и счета'],accounts:['Счета','Баланс и способы оплаты'],deliveries:['Поставки','Входящие поставки и расчёты'],writeoffs:['Списания','Учет движения товаров'],stock:['Остатки','Товары на складах'],stats:['Статистика','Продажи и динамика']};
 const allowed=()=>session.role==='seller'?db.warehouses.filter(w=>session.warehouses?.includes(w.id)).map(w=>w.name):db.warehouses.map(w=>w.name),filterRows=a=>session.role==='seller'?a.filter(x=>!x.warehouse||allowed().includes(x.warehouse)):a;
 function render(){if(!session)return login();const nav=session.role==='admin'?navA:navS,t=titles[db.page]||titles.overview;document.querySelector('#app').innerHTML=`<div class="app-shell"><aside class="sidebar" id="sidebar"><div class="brand"><div class="brand-mark">Q</div><div class="brand-text">qini</div><span class="role-pill">${session.role.toUpperCase()}</span></div><div class="nav-group"><div class="nav-label">Рабочий стол</div>${nav.map(x=>`<button class="nav-item ${db.page===x[0]?'active':''}" data-page="${x[0]}"><span class="nav-icon">${x[1]}</span>${x[2]}</button>`).join('')}</div><div class="sidebar-bottom"><button class="user-chip" id="profile"><div class="avatar">${session.name.split(' ').map(x=>x[0]).slice(0,2).join('')}</div><div><div class="user-name">${esc(session.name)}</div><div class="user-caption">${session.role==='admin'?'Администратор':'Продавец'}</div></div></button><button class="nav-item logout" id="logout"><span class="nav-icon">↪</span>Выйти</button></div></aside><main class="main"><header class="topbar"><div><button class="icon-btn mobile-toggle" id="mobileMenu">☰</button><div class="eyebrow">Qini / ${t[1]}</div><h1 class="page-title">${t[0]}, ${esc(session.name.split(' ')[0])}</h1></div><div class="top-actions"><button class="icon-btn">♧<span class="dot"></span></button></div></header><div id="pageContent">${page()}</div></main></div>`;bind()}
@@ -103,7 +124,7 @@ function bindLineRemove(){document.querySelectorAll('.remove-line').forEach(b=>b
 function openModal(type,id){const title=type==='profile'?'Мой профиль':id?'Редактировать запись':({delivery:'Новая поставка',writeoff:'Новое списание',sellers:'Новый продавец',suppliers:'Новый поставщик',warehouses:'Новый склад',accounts:'Новый счёт'}[type]||'Добавить');document.body.insertAdjacentHTML('beforeend',`<div class="modal-backdrop" id="modal"><div class="modal"><div class="modal-head"><div><h2 class="modal-title">${title}</h2><div class="modal-desc">Изменения сохраняются в Google Sheets</div></div><button class="close" id="x">×</button></div>${modal(type,id)}</div></div>`);el('#x').onclick=()=>el('#modal').remove();el('#closeModal').onclick=()=>el('#modal').remove();if(type==='delivery'||type==='writeoff'){const formEl=el(type==='delivery'?'#deliveryForm':'#writeoffForm');el(type==='delivery'?'#addDeliveryLine':'#addWriteoffLine').onclick=()=>{const target=el(type==='delivery'?'#deliveryLines':'#writeoffLines');target.insertAdjacentHTML('beforeend',lineHtml({},type));bindLineRemove()};bindLineRemove();formEl.addEventListener('input',()=>{const total=collectItems(formEl).reduce((a,x)=>a+x.qty*x.cost,0);const out=el(type==='delivery'?'#deliveryTotal':'#writeoffTotal');if(out)out.textContent=money(total)});formEl.onsubmit=async e=>{e.preventDefault();const submit=e.submitter;if(submit)submit.disabled=true;const f=new FormData(e.target),items=collectItems(e.target),total=items.reduce((a,x)=>a+x.qty*x.cost,0),supplier=f.get('supplier'),warehouse=f.get('warehouse'),account=f.get('account'),data={id:id||undefined,date:f.get('date'),warehouse,account,paid:+f.get('paid')||0,total,comment:f.get('comment'),items:JSON.stringify(items)};if(type==='delivery'){data.supplier=supplier;data.status=data.paid>=data.total?'paid':'due';data.supplierId=db.suppliers.find(x=>x.name===supplier)?.id||'';data.warehouseId=db.warehouses.find(x=>x.name===warehouse)?.id||'';data.accountId=db.accounts.find(x=>x.name===account)?.id||''}else{data.warehouseId=db.warehouses.find(x=>x.name===warehouse)?.id||'';data.accountId=db.accounts.find(x=>x.name===account)?.id||''}const response=await api(id?'update':'create',type==='delivery'?'Deliveries':'Writeoffs',data);if(API_URL&&!response.ok){if(submit)submit.disabled=false;toast('Ошибка сохранения: '+(response.error||'API'));return}items.forEach(i=>catalogAdd(i.name,i.pack));const list=type==='delivery'?db.deliveries:db.writeoffs,local={...data,items,date:data.date};if(id){const old=list.find(x=>x.id===id);Object.assign(old,local)}else{const newId=(response&&response.data&&response.data.id)||((type==='delivery'?'d':'wo')+Date.now());list.unshift({...local,id:newId})}save();el('#modal').remove();render();if(API_URL){try{await sync()}catch(e){}}toast(type==='delivery'?'Поставка сохранена':'Списание сохранено')}}else if(type==='profile')el('#profileForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);db.auth.name=f.get('name');db.auth.phone=f.get('phone');db.auth.login=f.get('login');if(f.get('password'))db.auth.password=f.get('password');session.name=db.auth.name;sessionStorage.setItem('qini-session',JSON.stringify(session));save();el('#modal').remove();render();toast('Профиль обновлён')};else{const f=el('#entityForm');if(!f)return;f.onsubmit=async e=>{e.preventDefault();const submit=e.submitter;if(submit)submit.disabled=true;const data=Object.fromEntries(new FormData(f)),t=f.dataset.type,id=f.dataset.id,list={sellers:db.users,suppliers:db.suppliers,warehouses:db.warehouses,accounts:db.accounts}[t];let selected=[];if(t==='sellers'){selected=new FormData(f).getAll('warehouses');data.warehouseIds=JSON.stringify(selected)}if(t==='accounts')Object.assign(data,{currency:data.currency||'GEL',payment:data.payment||'Наличный',balance:+data.initial||0});const payload={...data,id:id||undefined};const response=await api(id?'update':'create',t==='sellers'?'Sellers':t[0].toUpperCase()+t.slice(1),payload);if(API_URL&&!response.ok){if(submit)submit.disabled=false;toast('Ошибка сохранения: '+(response.error||'API'));return}delete data.warehouseIds;if(t==='sellers')data.warehouses=selected;if(id){const old=list.find(x=>x.id===id);if(!data.password)delete data.password;Object.assign(old,data)}else{data.id=(response&&response.data&&response.data.id)||data.id||(t[0]+Date.now());list.push(data)}save();el('#modal').remove();render();if(API_URL){try{await sync()}catch(e){}}toast(id?'Изменения сохранены':'Запись добавлена')}}}
 function confirmInApp(message){return new Promise(resolve=>{document.body.insertAdjacentHTML('beforeend',`<div class="modal-backdrop" id="confirmModal"><div class="confirm-modal"><div class="confirm-icon">!</div><h3>Удалить запись?</h3><p>${message}</p><div class="confirm-actions"><button class="btn btn-light" id="cancelConfirm">Отмена</button><button class="btn btn-danger" id="acceptConfirm">Удалить</button></div></div></div>`);el('#cancelConfirm').onclick=()=>{el('#confirmModal').remove();resolve(false)};el('#acceptConfirm').onclick=()=>{el('#confirmModal').remove();resolve(true)}})}
 function bind(){document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{db.page=b.dataset.page;stockFilter='';save();render()});document.querySelectorAll('#quickAdd').forEach(b=>b.onclick=()=>openModal(db.page==='deliveries'?'delivery':db.page==='writeoffs'?'writeoff':db.page));document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>{const [t,id]=b.dataset.edit.split(':');openModal(t==='deliveries'?'delivery':t==='writeoffs'?'writeoff':t,id)});document.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{const [t,id]=b.dataset.delete.split(':');if(t==='sales'||t==='writeoffs'){await deleteRecord(t,id);return}if(await confirmInApp(t==='deliveries'?'Удалить поставку и все продажи, сделанные из её партий?':'После удаления запись нельзя будет восстановить.')){const list={sellers:db.users,suppliers:db.suppliers,warehouses:db.warehouses,accounts:db.accounts,deliveries:db.deliveries,writeoffs:db.writeoffs}[t],i=list.findIndex(x=>x.id===id),entity=t==='sellers'?'Sellers':t[0].toUpperCase()+t.slice(1);const response=await api('delete',entity,{id});if(API_URL&&!response.ok){toast('Ошибка удаления: '+(response.error||'API'));return}if(t==='deliveries'){db.sales=(db.sales||[]).filter(s=>String(s.deliveryId)!==String(id))}if(i>=0)list.splice(i,1);save();render();if(API_URL){try{await sync()}catch(e){}}toast('Запись удалена')}});el('#profile')?.addEventListener('click',()=>session.role==='admin'?openModal('profile'):toast('Профиль изменяет администратор'));el('#logout')?.addEventListener('click',()=>{session=null;sessionStorage.removeItem('qini-session');render()});el('#mobileMenu')?.addEventListener('click',()=>el('#sidebar').classList.toggle('open'))}
-async function sync(){if(!API_URL||!session?.token)return;try{const r=await fetch(`${API_URL}?action=bootstrap&token=${encodeURIComponent(session.token)}`),text=await r.text(),p=JSON.parse(text);if(p.ok){const x=normalizeSheetData(p.data);db.accounts=x.Accounts||db.accounts;db.warehouses=x.Warehouses||db.warehouses;db.suppliers=x.Suppliers||db.suppliers;db.users=x.Sellers||db.users;const current=db.users.find(u=>String(u.id)===String(session.userId)||String(u.login)===String(session.login));if(session.role==='seller'&&current){session.userId=current.id;session.warehouses=current.warehouses||[];sessionStorage.setItem('qini-session',JSON.stringify(session))}db.sales=x.Sales||db.sales;db.deliveries=x.Deliveries||db.deliveries;db.writeoffs=x.Writeoffs||db.writeoffs;(db.deliveries||[]).forEach(d=>(d.items||[]).forEach(i=>catalogAdd(i.name,i.pack)));(db.writeoffs||[]).forEach(w=>(w.items||[]).forEach(i=>catalogAdd(i.name,i.pack)));(db.sales||[]).forEach(s=>catalogAdd(s.productName,s.pack));db.products=inventoryFromData(x);save();render()}}catch(e){console.warn('sync unavailable',e)}}
+async function sync(){if(!API_URL||!session?.token)return;try{const r=await fetch(`${API_URL}?action=bootstrap&token=${encodeURIComponent(session.token)}`),text=await r.text(),p=parseJsonResponse(text);if(p.ok){const x=normalizeSheetData(p.data);db.accounts=x.Accounts||db.accounts;db.warehouses=x.Warehouses||db.warehouses;db.suppliers=x.Suppliers||db.suppliers;db.users=x.Sellers||db.users;const current=db.users.find(u=>String(u.id)===String(session.userId)||String(u.login)===String(session.login));if(session.role==='seller'&&current){session.userId=current.id;session.warehouses=current.warehouses||[];sessionStorage.setItem('qini-session',JSON.stringify(session))}db.sales=x.Sales||db.sales;db.deliveries=x.Deliveries||db.deliveries;db.writeoffs=x.Writeoffs||db.writeoffs;(db.deliveries||[]).forEach(d=>(d.items||[]).forEach(i=>catalogAdd(i.name,i.pack)));(db.writeoffs||[]).forEach(w=>(w.items||[]).forEach(i=>catalogAdd(i.name,i.pack)));(db.sales||[]).forEach(s=>catalogAdd(s.productName,s.pack));db.products=inventoryFromData(x);save();render()}}catch(e){console.warn('sync unavailable',e)}}
 function stockSales(p){return (db.sales||[]).filter(s=>s.productName===p.name&&String(s.pack||'')===String(p.pack||'')&&(!p.warehouse||s.warehouse===p.warehouse)).reduce((a,s)=>({qty:a.qty+(+s.qty||0),total:a.total+(+s.total||0),profit:a.profit+(+s.profit||0)}),{qty:0,total:0,profit:0})}
 function decorateStock(){
   const table=document.querySelector('.table');if(!table)return;
@@ -148,7 +169,61 @@ function decorateStock(){
 function showDeliveryItems(id){const d=db.deliveries.find(x=>String(x.id)===String(id));if(!d)return;const rows=(d.items||[]).map(i=>`<tr><td>${esc(i.name)}</td><td>${esc(i.pack)}</td><td>${i.qty}</td><td>${money(i.cost)}</td><td>${money(i.qty*i.cost)}</td><td>${fmtPct(i.markup)}</td><td>${money(i.qty*i.cost*(1+(i.markup||0)/100))}</td></tr>`).join('');document.body.insertAdjacentHTML('beforeend',`<div class="modal-backdrop" id="itemsModal"><div class="modal"><div class="modal-head"><div><h2 class="modal-title">Товары в поставке</h2><div class="modal-desc">${displayDate(d.date)} · ${esc(d.supplier||'')} · ${esc(d.warehouse||'')}</div></div><button class="close" id="closeItems">×</button></div><div class="table-wrap"><table class="table"><thead><tr><th>Название</th><th>Фасовка</th><th>Количество</th><th>Себестоимость</th><th>Сумма</th><th>Наценка</th><th>Сумма с наценкой</th></tr></thead><tbody>${rows||'<tr><td colspan="7"><div class="empty">Товары не найдены</div></td></tr>'}</tbody></table></div></div></div>`);el('#closeItems').onclick=()=>el('#itemsModal').remove()}
 function decorateDeliveryActions(){const rows=document.querySelectorAll('.table tbody tr');rows.forEach((row,i)=>{const d=db.deliveries[i];if(!d||!session||session.role!=='admin'&&session.role!=='seller')return;const cell=row.lastElementChild;if(!cell)return;const b=document.createElement('button');b.className='action-btn';b.textContent='◉';b.title='Показать товары';b.onclick=()=>showDeliveryItems(d.id);cell.prepend(b)})}
 function openSaleModal(p){const accountId=db.warehouses.find(w=>w.name===p.warehouse)?.accountId||'';const deliveryInfo=p.deliveryDate?`Поставка: ${displayDate(p.deliveryDate)}${p.supplier?' · '+esc(p.supplier):''}`:'Партия без поставки';document.body.insertAdjacentHTML('beforeend',`<div class="modal-backdrop" id="saleModal"><div class="modal"><div class="modal-head"><div><h2 class="modal-title">Продажа товара</h2><div class="modal-desc">${esc(p.name)} · ${esc(p.pack)} · ${esc(p.warehouse||'')} · ${deliveryInfo}</div></div><button class="close" id="closeSale">×</button></div><form class="form" id="saleForm"><div class="form-grid"><div class="field"><label class="label">Дата и время</label><input class="input" name="date" type="datetime-local" value="${nowLocal()}" required></div><div class="field"><label class="label">Количество</label><input class="input" name="qty" type="number" min="0.01" max="${p.stock}" step="any" required></div><div class="field"><label class="label">Наценка, %</label><input class="input" name="markup" type="number" min="0" step="1" value="${Math.round(p.markup||0)}" required></div><div class="field"><label class="label">Цена продажи за единицу</label><input class="input" name="unitPrice" type="number" step="any" value="${(p.cost*(1+Math.round(p.markup||0)/100)).toFixed(2)}" required></div><div class="field full"><label class="label">Комментарий</label><input class="input" name="comment" placeholder="Необязательно"></div></div><div class="summary-row"><div><div class="summary-label">Сумма продажи</div><div class="summary-value retail-amount" id="saleTotal">0</div></div><div><div class="summary-label">Заработано</div><div class="summary-value profit-amount" id="saleProfit">0</div></div></div><div class="modal-foot"><button type="button" class="btn btn-light" id="closeSale2">Отмена</button><button class="btn btn-primary">Добавить продажу</button></div></form></div></div>`);const close=()=>el('#saleModal')?.remove();el('#closeSale').onclick=close;el('#closeSale2').onclick=close;const f=el('#saleForm'),recalc=(source)=>{const q=+(f.qty.value||0),markup=Math.round(+(f.markup.value||0)),price=+(f.unitPrice.value||0);if(source==='markup')f.unitPrice.value=(p.cost*(1+markup/100)).toFixed(2);else if(source==='price'&&p.cost)f.markup.value=Math.round(((price/p.cost)-1)*100);const finalPrice=+(f.unitPrice.value||0),total=q*finalPrice;el('#saleTotal').textContent=money(total);el('#saleProfit').textContent=money(q*(finalPrice-p.cost))};f.addEventListener('input',e=>recalc(e.target.name==='markup'?'markup':e.target.name==='unitPrice'?'price':''));recalc();f.onsubmit=async e=>{e.preventDefault();const q=+f.qty.value,price=+f.unitPrice.value,markup=Math.round(+f.markup.value||0),total=q*price,submit=e.submitter;if(submit){submit.disabled=true;submit.classList.add('is-loading');submit.innerHTML='<span class="spinner"></span> Сохраняем…'}const data={date:f.date.value,warehouseId:db.warehouses.find(w=>w.name===p.warehouse)?.id||'',accountId,productName:p.name,pack:p.pack,qty:q,markup,unitPrice:price,cost:p.cost,total,profit:q*(price-p.cost),sellerId:session.userId||'',deliveryId:p.deliveryId||'',comment:(f.comment?.value||'').trim()};const r=await api('create','Sales',data);if(API_URL&&!r.ok){if(submit){submit.disabled=false;submit.classList.remove('is-loading');submit.textContent='Добавить продажу'}toast('Ошибка сохранения: '+r.error);return}const newId=(r&&r.data&&r.data.id)||data.id||('sale'+Date.now());db.sales.push({...data,id:newId,warehouse:p.warehouse});save();close();render();if(API_URL){try{await sync()}catch(e){}}toast('Продажа добавлена')}}
+// === Меню ===
 function shortId(){const chars='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';let s='';for(let i=0;i<8;i++)s+=chars[Math.floor(Math.random()*chars.length)];return s}
+function getLastMenu(){try{return JSON.parse(localStorage.getItem('qini-last-menu')||'null')}catch(e){return null}}
+function setLastMenu(m){try{if(m)localStorage.setItem('qini-last-menu',JSON.stringify(m));else localStorage.removeItem('qini-last-menu')}catch(e){}}
+function cacheMenu(id,menu){try{sessionStorage.setItem('qini-menu-cache-'+id,JSON.stringify({t:Date.now(),m:menu}))}catch(e){}}
+function getCachedMenu(id){try{const raw=sessionStorage.getItem('qini-menu-cache-'+id);if(!raw)return null;const o=JSON.parse(raw);if(!o||Date.now()-o.t>10*60*1000)return null;return o.m}catch(e){return null}}
+function menuUrl(id){return location.origin+location.pathname+'#menu='+id}
+function showMenuLoading(){
+  const styles=`<style>body{background:#f7f8fc;margin:0}#app{min-height:100vh}.menu-page{max-width:720px;margin:0 auto;padding:32px 20px 60px;font-family:'DM Sans',sans-serif;color:#202432}.menu-loading{text-align:center;padding:100px 20px;color:#8c93a5}.spinner-lg{width:40px;height:40px;border:3px solid #e8eaf0;border-top-color:#7868ee;border-radius:50%;display:inline-block;animation:qini-spin 0.8s linear infinite;margin-bottom:18px}@keyframes qini-spin{to{transform:rotate(360deg)}}</style>`;
+  document.querySelector('#app').innerHTML=styles+`<div class="menu-page"><div class="menu-loading"><div class="spinner-lg"></div><div>Загрузка меню…</div></div></div>`;
+}
+function renderMenuPage(menu){
+  const items=Array.isArray(menu.items)?menu.items:[];
+  const styles=`body{background:#f7f8fc;margin:0}#app{min-height:100vh}.menu-page{max-width:720px;margin:0 auto;padding:32px 20px 60px;font-family:'DM Sans',sans-serif;color:#202432}.menu-header{text-align:center;padding:20px 0 30px;border-bottom:1px solid #e8eaf0;margin-bottom:24px}.menu-brand{width:54px;height:54px;margin:0 auto 16px;border-radius:16px;background:linear-gradient(145deg,#897af5,#6354db);color:#fff;display:grid;place-items:center;font-family:Manrope;font-weight:800;font-size:28px;box-shadow:0 12px 30px rgba(120,104,238,.35)}.menu-title{font:800 28px Manrope;letter-spacing:-1px;margin:0 0 8px}.menu-sub{color:#8c93a5;font-size:11px;letter-spacing:1px;text-transform:uppercase;font-weight:700}.menu-list{display:grid;gap:10px}.menu-item{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:18px 20px;background:#fff;border:1px solid #e8eaf0;border-radius:16px;box-shadow:0 6px 20px rgba(31,38,64,.05)}.menu-item-name{font-weight:700;font-size:15px}.menu-item-pack{color:#8c93a5;font-size:12px;margin-top:3px}.menu-item-price{font:800 17px Manrope;color:#7868ee;white-space:nowrap}.menu-empty{padding:60px 20px;text-align:center;color:#8c93a5}.menu-footer{text-align:center;margin-top:36px;color:#b1b5c2;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700}@media(max-width:500px){.menu-title{font-size:22px}.menu-item{padding:14px 16px}.menu-item-name{font-size:14px}.menu-item-price{font-size:15px}.menu-page{padding:20px 14px 40px}}`;
+  document.querySelector('#app').innerHTML=`<style>${styles}</style><div class="menu-page"><header class="menu-header"><div class="menu-brand">Q</div><h1 class="menu-title">${esc(menu.title||'Меню')}</h1><div class="menu-sub">Актуально на ${new Date().toLocaleDateString('ru-RU')}</div></header>${items.length?`<div class="menu-list">${items.map(i=>`<div class="menu-item"><div><div class="menu-item-name">${esc(i.n||'')}</div>${i.p?`<div class="menu-item-pack">${esc(i.p)}</div>`:''}</div><div class="menu-item-price">${money(i.pr)}</div></div>`).join('')}</div>`:'<div class="menu-empty">Меню пустое</div>'}<footer class="menu-footer">Сформировано в qini</footer></div>`;
+}
+function showMenuError(msg){
+  const styles=`<style>body{background:#f7f8fc;margin:0}#app{min-height:100vh}.menu-err{padding:100px 24px;text-align:center;font-family:'DM Sans',sans-serif;color:#8c93a5}.menu-err h2{color:#202432;font-family:Manrope;margin:0 0 10px}.menu-err button{margin-top:20px;background:#7868ee;color:#fff;border:0;border-radius:11px;padding:11px 18px;font-weight:700;cursor:pointer}</style>`;
+  document.querySelector('#app').innerHTML=`${styles}<div class="menu-err"><h2>${esc(msg)}</h2><p>Возможно, ссылка устарела или повреждена.</p><button onclick="location.reload()">Повторить</button></div>`;
+}
+async function renderMenuFromHash(raw){
+  showMenuLoading();
+  const looksShort=raw.length<=24&&/^[A-Za-z0-9]+$/.test(raw);
+  if(looksShort){
+    const cached=getCachedMenu(raw);
+    if(cached){renderMenuPage(cached);return}
+    if(!API_URL){showMenuError('Меню недоступно');return}
+    try{
+      const r=await fetch(`${API_URL}?action=menu&id=${encodeURIComponent(raw)}`);
+      const text=await r.text();
+      const t=String(text||'').trim();
+      if(!t||t[0]==='<'){showMenuError('Меню временно недоступно');return}
+      let data;try{data=JSON.parse(t)}catch(e){showMenuError('Некорректный ответ сервера');return}
+      if(data.ok&&data.menu){cacheMenu(raw,data.menu);renderMenuPage(data.menu);return}
+      showMenuError(data.error||'Меню не найдено');
+    }catch(e){showMenuError('Не удалось загрузить меню')}
+    return;
+  }
+  try{
+    const decoded=decodeURIComponent(escape(atob(raw)));
+    const menu=JSON.parse(decoded);
+    renderMenuPage(menu);
+  }catch(e){showMenuError('Не удалось открыть меню')}
+}
+function openMenuDialog(){
+  const last=getLastMenu();
+  if(!last){openCreateMenu();return}
+  const dateStr=last.ts?new Date(last.ts).toLocaleString('ru-RU',{dateStyle:'short',timeStyle:'short'}):'';
+  document.body.insertAdjacentHTML('beforeend',`<div class="modal-backdrop" id="menuDialog"><div class="modal" style="width:min(520px,100%)"><div class="modal-head"><div><h2 class="modal-title">Меню</h2><div class="modal-desc">У вас уже есть созданное меню</div></div><button class="close" id="closeDialog">×</button></div><div class="form"><div class="field full"><div style="padding:16px 18px;background:#fafaff;border:1px solid var(--line);border-radius:14px"><div style="font-weight:700;font-size:14px;margin-bottom:4px">${esc(last.title||'Меню')}</div><div style="color:var(--muted);font-size:12px">${last.items||0} товаров${dateStr?' · '+dateStr:''}</div></div></div></div><div class="modal-foot"><button type="button" class="btn btn-light" id="closeDialog2">Отмена</button><button type="button" class="btn btn-light" id="newMenuBtn">Создать новое</button><button type="button" class="btn btn-primary" id="openLastBtn">Открыть последнее</button></div></div></div>`);
+  const close=()=>el('#menuDialog')?.remove();
+  el('#closeDialog').onclick=close;
+  el('#closeDialog2').onclick=close;
+  el('#newMenuBtn').onclick=()=>{close();openCreateMenu()};
+  el('#openLastBtn').onclick=()=>{close();window.open(menuUrl(last.id),'_blank')};
+}
 function openCreateMenu(){
   const products=(db.products||[]).filter(p=>p.stock>0);
   if(!products.length){toast('Нет товаров в остатках');return}
@@ -165,23 +240,25 @@ function openCreateMenu(){
     const items=picks.map(i=>{const p=products[i];return {n:p.name,p:p.pack,pr:+((p.cost*(1+p.markup/100)).toFixed(2))}});
     const title=(f.get('title')||'Меню').trim();
     const menu={title,items,ts:Date.now()};
-    let url='';
-    if(API_URL){
-      const id=shortId();
-      const r=await api('saveMenu',null,{id,title,payload:JSON.stringify(menu)});
-      if(r.ok)url=location.origin+location.pathname+'#menu='+id;
-      else toast('Не удалось сохранить меню на сервере, использую длинную ссылку');
-    }
-    if(!url){
+    const prev=getLastMenu();
+    if(!API_URL){
       let b64;
       try{b64=btoa(unescape(encodeURIComponent(JSON.stringify(menu))))}catch(err){toast('Не удалось сформировать меню');return}
-      url=location.origin+location.pathname+'#menu='+b64;
+      close();
+      showMenuLink(location.origin+location.pathname+'#menu='+b64,null);
+      return;
     }
+    const id=shortId();
+    const r=await api('saveMenu',null,{id,title,payload:JSON.stringify(menu)});
+    if(!r.ok){toast('Не удалось сохранить меню: '+(r.error||'API'));return}
+    if(prev&&prev.id){api('deleteMenu',null,{id:prev.id}).catch(()=>{})}
+    cacheMenu(id,menu);
+    setLastMenu({id,title,items:items.length,ts:Date.now()});
     close();
-    showMenuLink(url);
+    showMenuLink(menuUrl(id),id);
   };
 }
-function showMenuLink(url){
+function showMenuLink(url,_id){
   document.body.insertAdjacentHTML('beforeend',`<div class="modal-backdrop" id="linkModal"><div class="modal" style="width:min(620px,100%)"><div class="modal-head"><div><h2 class="modal-title">Ссылка на меню готова</h2><div class="modal-desc">Скопируйте и отправьте клиенту</div></div><button class="close" id="closeLink">×</button></div><div class="form"><div class="field full"><label class="label">Ссылка</label><textarea class="textarea" id="menuLink" readonly rows="3" style="font-size:11px">${esc(url)}</textarea></div><div class="modal-foot"><button type="button" class="btn btn-light" id="previewLink">Открыть</button><button type="button" class="btn btn-light" id="closeLink2">Закрыть</button><button type="button" class="btn btn-primary" id="copyLink">Скопировать</button></div></div></div></div>`);
   el('#closeLink').onclick=()=>el('#linkModal').remove();
   el('#closeLink2').onclick=()=>el('#linkModal').remove();
@@ -191,67 +268,22 @@ function showMenuLink(url){
     catch(err){const ta=el('#menuLink');ta.focus();ta.select();try{document.execCommand('copy');toast('Ссылка скопирована')}catch(e2){toast('Скопируйте вручную')}}
   };
 }
-function renderMenuPage(menu){
-  const items=Array.isArray(menu.items)?menu.items:[];
-  const styles=`
-    body{background:#f7f8fc;margin:0}
-    #app{min-height:100vh}
-    .menu-page{max-width:720px;margin:0 auto;padding:32px 20px 60px;font-family:'DM Sans',sans-serif;color:#202432;position:relative}
-    .menu-close{position:fixed;top:16px;right:16px;width:40px;height:40px;border-radius:12px;background:#fff;border:1px solid #e8eaf0;color:#8c93a5;display:grid;place-items:center;text-decoration:none;font-size:22px;line-height:1;box-shadow:0 4px 14px rgba(31,38,64,.06);z-index:5}
-    .menu-close:hover{color:#7868ee}
-    .menu-header{text-align:center;padding:20px 0 30px;border-bottom:1px solid #e8eaf0;margin-bottom:24px}
-    .menu-brand{width:54px;height:54px;margin:0 auto 16px;border-radius:16px;background:linear-gradient(145deg,#897af5,#6354db);color:#fff;display:grid;place-items:center;font-family:Manrope;font-weight:800;font-size:28px;box-shadow:0 12px 30px rgba(120,104,238,.35)}
-    .menu-title{font:800 28px Manrope;letter-spacing:-1px;margin:0 0 8px}
-    .menu-sub{color:#8c93a5;font-size:11px;letter-spacing:1px;text-transform:uppercase;font-weight:700}
-    .menu-list{display:grid;gap:10px}
-    .menu-item{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:18px 20px;background:#fff;border:1px solid #e8eaf0;border-radius:16px;box-shadow:0 6px 20px rgba(31,38,64,.05)}
-    .menu-item-name{font-weight:700;font-size:15px}
-    .menu-item-pack{color:#8c93a5;font-size:12px;margin-top:3px}
-    .menu-item-price{font:800 17px Manrope;color:#7868ee;white-space:nowrap}
-    .menu-empty{padding:60px 20px;text-align:center;color:#8c93a5}
-    .menu-footer{text-align:center;margin-top:36px;color:#b1b5c2;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700}
-    @media(max-width:500px){.menu-title{font-size:22px}.menu-item{padding:14px 16px}.menu-item-name{font-size:14px}.menu-item-price{font-size:15px}.menu-page{padding:20px 14px 40px}}
-  `;
-  document.querySelector('#app').innerHTML=`<style>${styles}</style><div class="menu-page"><a class="menu-close" href="${location.pathname}" title="Закрыть">×</a><header class="menu-header"><div class="menu-brand">Q</div><h1 class="menu-title">${esc(menu.title||'Меню')}</h1><div class="menu-sub">Актуально на ${new Date().toLocaleDateString('ru-RU')}</div></header>${items.length?`<div class="menu-list">${items.map(i=>`<div class="menu-item"><div><div class="menu-item-name">${esc(i.n||'')}</div>${i.p?`<div class="menu-item-pack">${esc(i.p)}</div>`:''}</div><div class="menu-item-price">${money(i.pr)}</div></div>`).join('')}</div>`:'<div class="menu-empty">Меню пустое</div>'}<footer class="menu-footer">Сформировано в qini</footer></div>`;
-}
-function showMenuError(msg){
-  document.querySelector('#app').innerHTML=`<div style="padding:80px 20px;text-align:center;font-family:'DM Sans',sans-serif;color:#8c93a5"><h2 style="color:#202432;font-family:Manrope;margin:0 0 10px">${esc(msg)}</h2><p style="margin:0">Возможно, ссылка устарела или повреждена.</p></div>`;
-}
-async function maybeRenderMenu(){
+// === Инициализация ===
+const renderBase=render;render=()=>{renderBase();if(db.page==='stock'){decorateStock();const ss=document.getElementById('stockSearch');if(ss){ss.value=stockFilter;ss.addEventListener('input',()=>{stockFilter=ss.value;decorateStock()})}const cb=document.getElementById('createMenuBtn');if(cb)cb.onclick=openMenuDialog}if(db.page==='deliveries')decorateDeliveryActions();if(db.page==='writeoffs')decorateWriteoffs()};
+(async()=>{
   const hash=String(location.hash||'');
-  if(!hash.startsWith('#menu='))return false;
-  const raw=hash.slice(6);
-  const looksShort=raw.length<40&&!/[=/+]/.test(raw);
-  if(looksShort){
-    if(!API_URL){showMenuError('Меню недоступно');return true}
-    try{
-      const r=await fetch(`${API_URL}?action=menu&id=${encodeURIComponent(raw)}`);
-      const data=await r.json();
-      if(data.ok&&data.menu){renderMenuPage(data.menu);return true}
-      showMenuError(data.error||'Меню не найдено');
-      return true;
-    }catch(err){
-      showMenuError('Не удалось загрузить меню');
-      return true;
-    }
+  if(hash.startsWith('#menu=')){
+    await renderMenuFromHash(hash.slice(6));
+    return;
   }
-  try{
-    const decoded=decodeURIComponent(escape(atob(raw)));
-    const menu=JSON.parse(decoded);
-    renderMenuPage(menu);
-    return true;
-  }catch(e){
-    showMenuError('Не удалось открыть меню');
-    return true;
-  }
-}
-const renderBase=render;render=()=>{renderBase();if(db.page==='stock'){decorateStock();const ss=document.getElementById('stockSearch');if(ss){ss.value=stockFilter;ss.addEventListener('input',()=>{stockFilter=ss.value;decorateStock()})}const cb=document.getElementById('createMenuBtn');if(cb)cb.onclick=openCreateMenu}if(db.page==='deliveries')decorateDeliveryActions();if(db.page==='writeoffs')decorateWriteoffs()};
-(async()=>{if(!(await maybeRenderMenu())){render();sync()}})();
+  render();
+  sync();
+})();
 document.addEventListener('input',e=>{const form=e.target.closest('#deliveryForm,#writeoffForm');if(!form)return;const row=e.target.closest('.item-line');if(row&&e.target.name==='itemName'){const name=e.target.value,select=row.querySelector('[name=pack]');if(select){const current=select.value;const packs=catalogPacks(name);const custom=current==='__custom__';select.innerHTML=packOptionsHtml(packs,current,custom);select.value=current||''}}if(row&&e.target.name==='retailTotal'){const qty=+(row.querySelector('[name=qty]')?.value||0),cost=+(row.querySelector('[name=cost]')?.value||0);if(qty&&cost)row.querySelector('[name=markup]').value=Math.round(((+e.target.value/(qty*cost))-1)*100)}else form.querySelectorAll('.item-line').forEach(r=>{const qty=+(r.querySelector('[name=qty]')?.value||0),cost=+(r.querySelector('[name=cost]')?.value||0),markup=Math.round(+(r.querySelector('[name=markup]')?.value||30)),base=qty*cost,c=r.querySelector('[name=costTotal]'),ret=r.querySelector('[name=retailTotal]');if(c)c.value=base.toFixed(2);if(ret)ret.value=(base*(1+markup/100)).toFixed(2)});const items=collectItems(form),base=items.reduce((a,x)=>a+x.qty*x.cost,0),retail=items.reduce((a,x)=>a+(x.retailTotal||x.qty*x.cost*(1+x.markup/100)),0),out=form.querySelector('#deliveryTotal,#writeoffTotal'),retailOut=form.querySelector('#deliveryRetailTotal,#writeoffRetailTotal');if(out)out.textContent=money(base);if(retailOut)retailOut.textContent=money(retail)});
 document.addEventListener('change',e=>{if(e.target.name!=='pack')return;const custom=e.target.value==='__custom__',row=e.target.closest('.item-line'),input=row?.querySelector('[name=packCustom]');if(input){input.style.display=custom?'block':'none';if(custom)input.focus()}});
 document.addEventListener('change',e=>{if(e.target.name!=='pack')return;const form=e.target.closest('#writeoffForm'),row=e.target.closest('.item-line');if(!form||!row)return;const item=sourceItem(row.querySelector('[name=itemName]')?.value,row.querySelector('[name=pack]')?.value,form.querySelector('[name=warehouse]')?.value);if(item){row.querySelector('[name=cost]').value=item.cost||0;row.querySelector('[name=markup]').value=Math.round(item.markup||0);row.querySelector('[name=cost]').dispatchEvent(new Event('input',{bubbles:true}))}});
 document.addEventListener('focusin',e=>{if(e.target.matches('input[type=number],input[name=itemName]'))e.target.select()});
-document.addEventListener('submit',e=>{const b=e.submitter;if(b&&!b.classList.contains('is-loading')&&b.closest('#entityForm,#deliveryForm,#writeoffForm,#profileForm,#saleForm')){b.disabled=true;b.classList.add('is-loading');b.dataset.originalText=b.textContent;b.innerHTML='<span class="spinner"></span> Сохраняем…'}});
+document.addEventListener('submit',e=>{const b=e.submitter;if(b&&!b.classList.contains('is-loading')&&b.closest('#entityForm,#deliveryForm,#writeoffForm,#profileForm,#saleForm,#menuForm')){b.disabled=true;b.classList.add('is-loading');b.dataset.originalText=b.textContent;b.innerHTML='<span class="spinner"></span> Сохраняем…'}});
 const apiOriginal=api;
 api=async(action,entity,data)=>{
   if(entity==='Sales'){
