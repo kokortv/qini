@@ -228,16 +228,19 @@ function lineHtml(item={},kind='delivery'){
   const custom=item.pack&&!packs.includes(item.pack);
   return `<div class="line-item item-line"><input class="input" name="itemName" list="qini-products" value="${esc(item.name||'')}" placeholder="Название товара"><select class="select" name="pack">${packOptionsHtml(packs,item.pack,custom)}</select><input class="input pack-custom" name="packCustom" value="${custom?esc(item.pack):''}" placeholder="Введите фасовку" style="display:${custom?'block':'none'}"><input class="input" name="qty" type="number" value="${item.qty||''}" placeholder="Количество"><input class="input" name="cost" type="number" value="${item.cost||''}" placeholder="Цена / себестоимость"><input class="input calculated-cost" name="costTotal" value="${cost||0}" readonly><input class="input markup-field" name="markup" type="number" min="0" step="1" value="${Math.round(item.markup||30)}" placeholder="Наценка %"><input class="input calculated-retail" name="retailTotal" type="number" value="${retail||0}" placeholder="Сумма с наценкой"><button type="button" class="remove-line">×</button></div>`;
 }
+function lineHeaderHtml(){
+  return `<div class="line-head"><div>Товар</div><div>Фасовка</div><div>Кол-во</div><div>Себестоимость</div><div>Сумма</div><div>Наценка, %</div><div>С наценкой</div><div></div></div>`;
+}
 function productDatalist(){return `<datalist id="qini-products">${catalogNames().map(n=>`<option value="${esc(n)}"></option>`).join('')}</datalist>`}
 function deliveryForm(id){
   const old=db.deliveries.find(x=>x.id===id)||{};
   const items=old.items?.length?old.items:[{}];
-  return `<form class="form" id="deliveryForm" data-id="${id||''}">${productDatalist()}<div class="form-grid"><div class="field"><label class="label">Дата и время</label><input class="input" name="date" type="datetime-local" value="${inputDate(old.date)}" required></div><div class="field"><label class="label">Поставщик</label><select class="select" name="supplier">${db.suppliers.map(x=>`<option ${x.name===old.supplier?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div><div class="field"><label class="label">Склад</label><select class="select" name="warehouse">${allowed().map(x=>`<option ${x===old.warehouse?'selected':''}>${esc(x)}</option>`).join('')}</select></div><div class="field"><label class="label">Счёт</label><select class="select" name="account">${db.accounts.map(x=>`<option ${x.name===old.account?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div><div class="field"><label class="label">Оплаченная сумма</label><input class="input" name="paid" type="number" min="0" value="${old.paid||''}" placeholder="Можно оставить пустым"></div><div class="field"><label class="label">Комментарий</label><input class="input" name="comment" value="${esc(old.comment||'')}" placeholder="Необязательно"></div><div class="field full"><label class="label">Товары в поставке</label><div class="line-items" id="deliveryLines">${items.map(i=>lineHtml(i)).join('')}</div><button type="button" class="add-line" id="addDeliveryLine">＋ Добавить ещё товар</button></div></div><div class="summary-row"><div><div class="summary-label">Сумма поставки</div><div class="summary-value" id="deliveryTotal">${money(old.total||0)}</div></div><div><div class="summary-label">Сумма с наценкой</div><div class="summary-value retail-amount" id="deliveryRetailTotal">${money(items.reduce((a,i)=>a+(i.retailTotal||((i.qty||0)*(i.cost||0)*(1+(Math.round(i.markup||30))/100))),0))}</div></div></div><div class="modal-foot"><button type="button" class="btn btn-light" id="closeModal">Отмена</button><button class="btn btn-primary">${id?'Сохранить изменения':'Добавить поставку'}</button></div></form>`;
+  return `<form class="form" id="deliveryForm" data-id="${id||''}">${productDatalist()}<div class="form-grid"><div class="field"><label class="label">Дата и время</label><input class="input" name="date" type="datetime-local" value="${inputDate(old.date)}" required></div><div class="field"><label class="label">Поставщик</label><select class="select" name="supplier">${db.suppliers.map(x=>`<option ${x.name===old.supplier?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div><div class="field"><label class="label">Склад</label><select class="select" name="warehouse">${allowed().map(x=>`<option ${x===old.warehouse?'selected':''}>${esc(x)}</option>`).join('')}</select></div><div class="field"><label class="label">Счёт</label><select class="select" name="account">${db.accounts.map(x=>`<option ${x.name===old.account?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div><div class="field"><label class="label">Оплаченная сумма</label><input class="input" name="paid" type="number" min="0" value="${old.paid||''}" placeholder="Можно оставить пустым"></div><div class="field"><label class="label">Комментарий</label><input class="input" name="comment" value="${esc(old.comment||'')}" placeholder="Необязательно"></div><div class="field full"><label class="label">Товары в поставке</label><div class="line-items" id="deliveryLines">${lineHeaderHtml()}${items.map(i=>lineHtml(i)).join('')}</div><button type="button" class="add-line" id="addDeliveryLine">＋ Добавить ещё товар</button></div></div><div class="summary-row"><div><div class="summary-label">Сумма поставки</div><div class="summary-value" id="deliveryTotal">${money(old.total||0)}</div></div><div><div class="summary-label">Сумма с наценкой</div><div class="summary-value retail-amount" id="deliveryRetailTotal">${money(items.reduce((a,i)=>a+(i.retailTotal||((i.qty||0)*(i.cost||0)*(1+(Math.round(i.markup||30))/100))),0))}</div></div></div><div class="modal-foot"><button type="button" class="btn btn-light" id="closeModal">Отмена</button><button class="btn btn-primary">${id?'Сохранить изменения':'Добавить поставку'}</button></div></form>`;
 }
 function writeoffForm(id){
   const old=db.writeoffs.find(x=>x.id===id)||{};
   const items=old.items?.length?old.items:[{}];
-  return `<form class="form" id="writeoffForm" data-id="${id||''}">${productDatalist()}<div class="form-grid"><div class="field"><label class="label">Дата и время</label><input class="input" name="date" type="datetime-local" value="${inputDate(old.date)}" required></div><div class="field"><label class="label">Склад</label><select class="select" name="warehouse">${allowed().map(x=>`<option ${x===old.warehouse?'selected':''}>${esc(x)}</option>`).join('')}</select></div><div class="field"><label class="label">Счёт зачисления</label><select class="select" name="account">${db.accounts.map(x=>`<option ${x.name===old.account?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div><div class="field"><label class="label">Комментарий</label><input class="input" name="comment" value="${esc(old.comment||'')}" placeholder="Необязательно"></div><div class="field full"><label class="label">Товары к списанию</label><div class="line-items" id="writeoffLines">${items.map(i=>lineHtml(i,'writeoff')).join('')}</div><button type="button" class="add-line" id="addWriteoffLine">＋ Добавить ещё товар</button></div></div><div class="summary-row"><div><div class="summary-label">Сумма списания</div><div class="summary-value" id="writeoffTotal">${money(old.total||0)}</div></div><div><div class="summary-label">Цена с наценкой</div><div class="summary-value retail-amount" id="writeoffRetailTotal">${money(items.reduce((a,i)=>a+(i.retailTotal||((i.qty||0)*(i.cost||0)*(1+(Math.round(i.markup||30))/100))),0))}</div></div></div><div class="modal-foot"><button type="button" class="btn btn-light" id="closeModal">Отмена</button><button class="btn btn-primary">${id?'Сохранить изменения':'Добавить списание'}</button></div></form>`;
+  return `<form class="form" id="writeoffForm" data-id="${id||''}">${productDatalist()}<div class="form-grid"><div class="field"><label class="label">Дата и время</label><input class="input" name="date" type="datetime-local" value="${inputDate(old.date)}" required></div><div class="field"><label class="label">Склад</label><select class="select" name="warehouse">${allowed().map(x=>`<option ${x===old.warehouse?'selected':''}>${esc(x)}</option>`).join('')}</select></div><div class="field"><label class="label">Счёт зачисления</label><select class="select" name="account">${db.accounts.map(x=>`<option ${x.name===old.account?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div><div class="field"><label class="label">Комментарий</label><input class="input" name="comment" value="${esc(old.comment||'')}" placeholder="Необязательно"></div><div class="field full"><label class="label">Товары к списанию</label><div class="line-items" id="writeoffLines">${lineHeaderHtml()}${items.map(i=>lineHtml(i,'writeoff')).join('')}</div><button type="button" class="add-line" id="addWriteoffLine">＋ Добавить ещё товар</button></div></div><div class="summary-row"><div><div class="summary-label">Сумма списания</div><div class="summary-value" id="writeoffTotal">${money(old.total||0)}</div></div><div><div class="summary-label">Цена с наценкой</div><div class="summary-value retail-amount" id="writeoffRetailTotal">${money(items.reduce((a,i)=>a+(i.retailTotal||((i.qty||0)*(i.cost||0)*(1+(Math.round(i.markup||30))/100))),0))}</div></div></div><div class="modal-foot"><button type="button" class="btn btn-light" id="closeModal">Отмена</button><button class="btn btn-primary">${id?'Сохранить изменения':'Добавить списание'}</button></div></form>`;
 }
 function modal(type,id){
   if(type==='delivery')return deliveryForm(id);
@@ -350,21 +353,9 @@ function bind(){
   document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{db.page=b.dataset.page;stockFilter='';save();render()});
   document.querySelectorAll('#quickAdd').forEach(b=>b.onclick=()=>openModal(db.page==='deliveries'?'delivery':db.page==='writeoffs'?'writeoff':db.page));
   document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>{const [t,id]=b.dataset.edit.split(':');openModal(t==='deliveries'?'delivery':t==='writeoffs'?'writeoff':t,id)});
-  document.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{
+  document.querySelectorAll('[data-delete]').forEach(b=>b.onclick=()=>{
     const [t,id]=b.dataset.delete.split(':');
-    if(t==='sales'||t==='writeoffs'){await deleteRecord(t,id);return}
-    if(await confirmInApp(t==='deliveries'?'Удалить поставку и все продажи, сделанные из её партий?':'После удаления запись нельзя будет восстановить.')){
-      const list={sellers:db.users,suppliers:db.suppliers,warehouses:db.warehouses,accounts:db.accounts,deliveries:db.deliveries,writeoffs:db.writeoffs}[t];
-      const i=list.findIndex(x=>x.id===id);
-      const entity=t==='sellers'?'Sellers':t[0].toUpperCase()+t.slice(1);
-      const response=await api('delete',entity,{id});
-      if(API_URL&&!response.ok){toast('Ошибка удаления: '+(response.error||'API'));return}
-      if(t==='deliveries'){db.sales=(db.sales||[]).filter(s=>String(s.deliveryId)!==String(id))}
-      if(i>=0)list.splice(i,1);
-      save();render();
-      if(API_URL){try{await sync()}catch(e){}}
-      toast('Запись удалена');
-    }
+    deleteRecord(t,id);
   });
   el('#profile')?.addEventListener('click',()=>session.role==='admin'?openModal('profile'):toast('Профиль изменяет администратор'));
   el('#logout')?.addEventListener('click',()=>{session=null;sessionStorage.removeItem('qini-session');render()});
@@ -457,15 +448,30 @@ function decorateWriteoffs(){
   table.querySelectorAll('[data-delete]').forEach(b=>b.onclick=()=>deleteRecord('writeoffs',b.dataset.delete.split(':')[1]));
 }
 async function deleteRecord(type,id){
-  if(!(await confirmInApp('После удаления запись нельзя будет восстановить.')))return;
-  const list={sales:db.sales,writeoffs:db.writeoffs}[type];
-  const response=await api('delete',type==='sales'?'Sales':'Writeoffs',{id});
-  if(API_URL&&!response.ok){toast('Ошибка удаления: '+(response.error||'API'));return}
-  const i=list.findIndex(x=>String(x.id)===String(id));
-  if(i>=0)list.splice(i,1);
-  save();render();
-  if(API_URL){try{await sync()}catch(e){}}
-  toast('Запись удалена');
+  const message=type==='deliveries'
+    ?'Удалить поставку и все продажи, сделанные из её партий?'
+    :'После удаления запись нельзя будет восстановить.';
+  if(!(await confirmInApp(message)))return;
+  if(type==='sales'){
+    const i=(db.sales||[]).findIndex(x=>String(x.id)===String(id));
+    if(i>=0)db.sales.splice(i,1);
+  }else if(type==='writeoffs'){
+    const i=(db.writeoffs||[]).findIndex(x=>String(x.id)===String(id));
+    if(i>=0)db.writeoffs.splice(i,1);
+  }else if(type==='deliveries'){
+    const list=db.deliveries,i=list.findIndex(x=>String(x.id)===String(id));
+    if(i>=0)list.splice(i,1);
+    db.sales=(db.sales||[]).filter(s=>String(s.deliveryId)!==String(id));
+  }else{
+    const list={sellers:db.users,suppliers:db.suppliers,warehouses:db.warehouses,accounts:db.accounts}[type];
+    if(list){const i=list.findIndex(x=>String(x.id)===String(id));if(i>=0)list.splice(i,1)}
+  }
+  save();render();toast('Запись удалена');
+  if(!API_URL)return;
+  const entity=type==='sales'?'Sales':type==='writeoffs'?'Writeoffs':type==='deliveries'?'Deliveries':type==='sellers'?'Sellers':type[0].toUpperCase()+type.slice(1);
+  const response=await api('delete',entity,{id});
+  if(!response.ok)toast('Ошибка удаления: '+(response.error||'API'));
+  try{await sync()}catch(e){}
 }
 function openSaleModal(p){
   const accountId=db.warehouses.find(w=>w.name===p.warehouse)?.accountId||'';
