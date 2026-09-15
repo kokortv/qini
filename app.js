@@ -36,7 +36,6 @@ function inventoryFromData(x){
   (x.Writeoffs||[]).forEach(w=>(w.items||[]).forEach(i=>{if(!i?.name)return;const b=findBatch(i.name,i.pack||'',w.warehouse,i.deliveryId);if(b)b.stock-=(+i.qty||0)}));
   return batches.filter(b=>b.stock>0.000001);
 }
-// Каталог названий и фасовок — хранится отдельно, чтобы не пропадал при удалении поставок.
 function ensureCatalog(){
   if(Array.isArray(db.catalog))return;
   const seen=new Map();
@@ -54,7 +53,20 @@ function catalogAdd(name,pack){
   if(!db.catalog.some(x=>x.name===n&&String(x.pack||'')===p))db.catalog.push({name:n,pack:p});
 }
 function catalogNames(){ensureCatalog();return [...new Set(db.catalog.map(x=>x.name))].sort((a,b)=>a.localeCompare(b,'ru'))}
-function catalogPacks(name){ensureCatalog();const q=String(name||'').toLocaleLowerCase();const match=n=>!q||String(n||'').toLocaleLowerCase()===q||String(n||'').toLocaleLowerCase().startsWith(q);return [...new Set(db.catalog.filter(x=>match(x.name)).map(x=>x.pack).filter(Boolean))]}
+// Все фасовки каталога всегда доступны. Фасовки товаров с совпадающим названием идут первыми.
+function catalogPacks(name){
+  ensureCatalog();
+  const q=String(name||'').toLocaleLowerCase().trim();
+  const matching=[],others=[];
+  db.catalog.forEach(x=>{
+    const pack=x.pack;
+    if(!pack)return;
+    const nm=String(x.name||'').toLocaleLowerCase();
+    const hit=q&&(nm===q||nm.startsWith(q));
+    (hit?matching:others).push(pack);
+  });
+  return [...new Set([...matching,...others])];
+}
 function sourceItem(name,pack,warehouse){const found=(db.deliveries||[]).flatMap(d=>(d.items||[]).map(i=>({...i,warehouse:d.warehouse}))).find(i=>i.name===name&&(!pack||i.pack===pack)&&(!warehouse||i.warehouse===warehouse));return found||null}
 db.users=db.users.map(normalizeUser);
 ensureCatalog();
@@ -93,7 +105,34 @@ function confirmInApp(message){return new Promise(resolve=>{document.body.insert
 function bind(){document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{db.page=b.dataset.page;save();render()});document.querySelectorAll('#quickAdd').forEach(b=>b.onclick=()=>openModal(db.page==='deliveries'?'delivery':db.page==='writeoffs'?'writeoff':db.page));document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>{const [t,id]=b.dataset.edit.split(':');openModal(t==='deliveries'?'delivery':t==='writeoffs'?'writeoff':t,id)});document.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{const [t,id]=b.dataset.delete.split(':');if(t==='sales'||t==='writeoffs'){await deleteRecord(t,id);return}if(await confirmInApp(t==='deliveries'?'Удалить поставку и все продажи, сделанные из её партий?':'После удаления запись нельзя будет восстановить.')){const list={sellers:db.users,suppliers:db.suppliers,warehouses:db.warehouses,accounts:db.accounts,deliveries:db.deliveries,writeoffs:db.writeoffs}[t],i=list.findIndex(x=>x.id===id),entity=t==='sellers'?'Sellers':t[0].toUpperCase()+t.slice(1);const response=await api('delete',entity,{id});if(API_URL&&!response.ok){toast('Ошибка удаления: '+(response.error||'API'));return}if(t==='deliveries'){db.sales=(db.sales||[]).filter(s=>String(s.deliveryId)!==String(id))}if(i>=0)list.splice(i,1);save();render();if(API_URL){try{await sync()}catch(e){}}toast('Запись удалена')}});el('#profile')?.addEventListener('click',()=>session.role==='admin'?openModal('profile'):toast('Профиль изменяет администратор'));el('#logout')?.addEventListener('click',()=>{session=null;sessionStorage.removeItem('qini-session');render()});el('#mobileMenu')?.addEventListener('click',()=>el('#sidebar').classList.toggle('open'))}
 async function sync(){if(!API_URL||!session?.token)return;try{const r=await fetch(`${API_URL}?action=bootstrap&token=${encodeURIComponent(session.token)}`),text=await r.text(),p=JSON.parse(text);if(p.ok){const x=normalizeSheetData(p.data);db.accounts=x.Accounts||db.accounts;db.warehouses=x.Warehouses||db.warehouses;db.suppliers=x.Suppliers||db.suppliers;db.users=x.Sellers||db.users;const current=db.users.find(u=>String(u.id)===String(session.userId)||String(u.login)===String(session.login));if(session.role==='seller'&&current){session.userId=current.id;session.warehouses=current.warehouses||[];sessionStorage.setItem('qini-session',JSON.stringify(session))}db.sales=x.Sales||db.sales;db.deliveries=x.Deliveries||db.deliveries;db.writeoffs=x.Writeoffs||db.writeoffs;(db.deliveries||[]).forEach(d=>(d.items||[]).forEach(i=>catalogAdd(i.name,i.pack)));(db.writeoffs||[]).forEach(w=>(w.items||[]).forEach(i=>catalogAdd(i.name,i.pack)));(db.sales||[]).forEach(s=>catalogAdd(s.productName,s.pack));db.products=inventoryFromData(x);save();render()}}catch(e){console.warn('sync unavailable',e)}}
 function stockSales(p){return (db.sales||[]).filter(s=>s.productName===p.name&&String(s.pack||'')===String(p.pack||'')&&(!p.warehouse||s.warehouse===p.warehouse)).reduce((a,s)=>({qty:a.qty+(+s.qty||0),total:a.total+(+s.total||0),profit:a.profit+(+s.profit||0)}),{qty:0,total:0,profit:0})}
-function decorateStock(){const table=document.querySelector('.table');if(!table)return;const tr=table.querySelector('thead tr'),heads=table.querySelectorAll('thead th'),labels=['Товар','Склад','Поставка','Остаток','Себестоимость','Сумма без наценки','Наценка','Цена с наценкой / ед.','Итого с наценкой',''];labels.forEach((x,i)=>{if(heads[i])heads[i].textContent=x;else{const h=document.createElement('th');h.textContent=x;tr.appendChild(h)}});table.querySelectorAll('tbody tr').forEach((row,i)=>{const p=db.products[i];if(!p)return;const unit=p.cost*(1+p.markup/100);const deliveryLabel=p.deliveryDate?`${displayDate(p.deliveryDate)}${p.supplier?' · '+esc(p.supplier):''}`:'—';row.innerHTML=`<td>${esc(p.name)} <span style="color:var(--muted);font-weight:400">${esc(p.pack)}</span></td><td>${esc(p.warehouse||'—')}</td><td style="white-space:nowrap">${deliveryLabel}</td><td class="amount">${p.stock} шт</td><td class="cost-amount">${money(p.cost)}</td><td class="cost-amount">${money(p.cost*p.stock)}</td><td>${fmtPct(p.markup)}</td><td class="retail-amount">${money(unit)}</td><td class="retail-amount">${money(unit*p.stock)}</td><td><button class="btn btn-primary btn-sm sell-stock" data-stock-index="${i}">Продать</button></td>`})}
+// Заголовки таблицы «Остатки» — сокращённые, полные в title.
+function decorateStock(){
+  const table=document.querySelector('.table');if(!table)return;
+  const tr=table.querySelector('thead tr'),heads=table.querySelectorAll('thead th');
+  const labels=[
+    {t:'Товар',title:'Товар'},
+    {t:'Склад',title:'Склад'},
+    {t:'Партия',title:'Партия — дата и поставщик поставки'},
+    {t:'Ост.',title:'Остаток на складе'},
+    {t:'Себес.',title:'Себестоимость за единицу'},
+    {t:'Закуп',title:'Сумма по себестоимости (себестоимость × остаток)'},
+    {t:'Нц.',title:'Наценка, %'},
+    {t:'Цена',title:'Цена с наценкой за единицу'},
+    {t:'Итого',title:'Итого с наценкой (цена × остаток)'},
+    {t:'',title:''}
+  ];
+  labels.forEach((x,i)=>{
+    if(heads[i]){heads[i].textContent=x.t;heads[i].title=x.title}
+    else{const h=document.createElement('th');h.textContent=x.t;h.title=x.title;tr.appendChild(h)}
+  });
+  table.querySelectorAll('tbody tr').forEach((row,i)=>{
+    const p=db.products[i];if(!p)return;
+    const unit=p.cost*(1+p.markup/100);
+    const deliveryFull=p.deliveryDate?`${displayDate(p.deliveryDate)}${p.supplier?' · '+p.supplier:''}`:'—';
+    const deliveryShort=p.deliveryDate?displayDate(p.deliveryDate):'—';
+    row.innerHTML=`<td>${esc(p.name)} <span style="color:var(--muted);font-weight:400">${esc(p.pack)}</span></td><td>${esc(p.warehouse||'—')}</td><td title="${esc(deliveryFull)}" style="white-space:nowrap">${esc(deliveryShort)}</td><td class="amount">${p.stock} шт</td><td class="cost-amount">${money(p.cost)}</td><td class="cost-amount">${money(p.cost*p.stock)}</td><td>${fmtPct(p.markup)}</td><td class="retail-amount">${money(unit)}</td><td class="retail-amount">${money(unit*p.stock)}</td><td><button class="btn btn-primary btn-sm sell-stock" data-stock-index="${i}">Продать</button></td>`;
+  });
+}
 function showDeliveryItems(id){const d=db.deliveries.find(x=>String(x.id)===String(id));if(!d)return;const rows=(d.items||[]).map(i=>`<tr><td>${esc(i.name)}</td><td>${esc(i.pack)}</td><td>${i.qty}</td><td>${money(i.cost)}</td><td>${money(i.qty*i.cost)}</td><td>${fmtPct(i.markup)}</td><td>${money(i.qty*i.cost*(1+(i.markup||0)/100))}</td></tr>`).join('');document.body.insertAdjacentHTML('beforeend',`<div class="modal-backdrop" id="itemsModal"><div class="modal"><div class="modal-head"><div><h2 class="modal-title">Товары в поставке</h2><div class="modal-desc">${displayDate(d.date)} · ${esc(d.supplier||'')} · ${esc(d.warehouse||'')}</div></div><button class="close" id="closeItems">×</button></div><div class="table-wrap"><table class="table"><thead><tr><th>Название</th><th>Фасовка</th><th>Количество</th><th>Себестоимость</th><th>Сумма</th><th>Наценка</th><th>Сумма с наценкой</th></tr></thead><tbody>${rows||'<tr><td colspan="7"><div class="empty">Товары не найдены</div></td></tr>'}</tbody></table></div></div></div>`);el('#closeItems').onclick=()=>el('#itemsModal').remove()}
 function decorateDeliveryActions(){const rows=document.querySelectorAll('.table tbody tr');rows.forEach((row,i)=>{const d=db.deliveries[i];if(!d||!session||session.role!=='admin'&&session.role!=='seller')return;const cell=row.lastElementChild;if(!cell)return;const b=document.createElement('button');b.className='action-btn';b.textContent='◉';b.title='Показать товары';b.onclick=()=>showDeliveryItems(d.id);cell.prepend(b)})}
 function decorateStockPreview(){document.querySelectorAll('.table tbody tr').forEach((row,i)=>{const p=db.products[i],cell=row.children[6];if(!p||!cell||cell.dataset.ready)return;cell.dataset.ready='1';cell.innerHTML=`<input class="input preview-markup" type="number" min="0" value="${p.markup}" style="width:70px"> %`;const input=cell.querySelector('input');input.addEventListener('input',()=>{const markup=+input.value||0,unit=p.cost*(1+markup/100);row.children[7].textContent=money(unit);row.children[8].textContent=money(unit*p.stock)})});document.querySelectorAll('.sell-stock').forEach(b=>b.onclick=()=>openSaleModal(db.products[+b.dataset.stockIndex]))}
