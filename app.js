@@ -103,6 +103,15 @@ ensureCatalog();
 let session=null;
 try{session=JSON.parse(sessionStorage.getItem('qini-session')||'null')}catch(e){sessionStorage.removeItem('qini-session')}
 let stockFilter='';
+let syncState='idle';
+function setSyncStatus(state){
+  syncState=state;
+  const n=document.getElementById('syncStatus');
+  if(!n)return;
+  n.dataset.state=state;
+  const map={idle:'Не синхронизировано',pending:'Синхронизация…',sync:'Синхронизировано',error:'Ошибка синхронизации'};
+  n.title=map[state]||'';
+}
 const save=()=>{db.products=inventoryFromData({Deliveries:db.deliveries,Writeoffs:db.writeoffs,Sales:db.sales});localStorage.setItem('qini-db',JSON.stringify(db))};
 const money=(n,c='GEL')=>`${Number(n||0).toLocaleString('ru-RU',{maximumFractionDigits:2})} ${CURRENCY[c]||'₾'}`;
 const esc=(s='')=>String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
@@ -117,17 +126,19 @@ function parseJsonResponse(text){
 }
 async function api(action,entity,data){
   if(!API_URL)return {ok:false,error:'API_URL не настроен'};
+  setSyncStatus('pending');
   let result;
   try{
     const r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action,entity,data,token:session?.token||''})});
     const text=await r.text();
     result=parseJsonResponse(text);
-  }catch(e){return {ok:false,error:'Сеть: '+e.message}}
+  }catch(e){setSyncStatus('error');return {ok:false,error:'Сеть: '+e.message}}
   if(!result.ok&&/сессия|session/i.test(result.error||'')){
     session=null;sessionStorage.removeItem('qini-session');
     toast('Сессия истекла. Войдите снова.');
     setTimeout(()=>render(),900);
   }
+  setSyncStatus(result.ok?'sync':'error');
   return result;
 }
 function login(){
@@ -168,8 +179,9 @@ const filterRows=a=>session.role==='seller'?a.filter(x=>!x.warehouse||allowed().
 function render(){
   if(!session)return login();
   const nav=session.role==='admin'?navA:navS,t=titles[db.page]||titles.overview;
-  document.querySelector('#app').innerHTML=`<div class="app-shell"><aside class="sidebar" id="sidebar"><div class="brand"><div class="brand-mark">Q</div><div class="brand-text">qini</div><span class="role-pill">${session.role.toUpperCase()}</span></div><div class="nav-group"><div class="nav-label">Рабочий стол</div>${nav.map(x=>`<button class="nav-item ${db.page===x[0]?'active':''}" data-page="${x[0]}"><span class="nav-icon">${x[1]}</span>${x[2]}</button>`).join('')}</div><div class="sidebar-bottom"><button class="user-chip" id="profile"><div class="avatar">${session.name.split(' ').map(x=>x[0]).slice(0,2).join('')}</div><div><div class="user-name">${esc(session.name)}</div><div class="user-caption">${session.role==='admin'?'Администратор':'Продавец'}</div></div></button><button class="nav-item logout" id="logout"><span class="nav-icon">↪</span>Выйти</button></div></aside><main class="main"><header class="topbar"><div><button class="icon-btn mobile-toggle" id="mobileMenu">☰</button><div class="eyebrow">Qini / ${t[1]}</div><h1 class="page-title">${t[0]}, ${esc(session.name.split(' ')[0])}</h1></div><div class="top-actions"><button class="icon-btn">♧<span class="dot"></span></button></div></header><div id="pageContent">${page()}</div></main></div>`;
+  document.querySelector('#app').innerHTML=`<div class="app-shell"><aside class="sidebar" id="sidebar"><div class="brand"><div class="brand-mark">Q</div><div class="brand-text">qini</div><span class="role-pill">${session.role.toUpperCase()}</span></div><div class="nav-group"><div class="nav-label">Рабочий стол</div>${nav.map(x=>`<button class="nav-item ${db.page===x[0]?'active':''}" data-page="${x[0]}"><span class="nav-icon">${x[1]}</span>${x[2]}</button>`).join('')}</div><div class="sidebar-bottom"><button class="user-chip" id="profile"><div class="avatar">${session.name.split(' ').map(x=>x[0]).slice(0,2).join('')}</div><div><div class="user-name">${esc(session.name)}</div><div class="user-caption">${session.role==='admin'?'Администратор':'Продавец'}</div></div></button><button class="nav-item logout" id="logout"><span class="nav-icon">↪</span>Выйти</button></div></aside><main class="main"><header class="topbar"><div><button class="icon-btn mobile-toggle" id="mobileMenu">☰</button><div class="eyebrow">Qini / ${t[1]}</div><h1 class="page-title">${t[0]}, ${esc(session.name.split(' ')[0])}</h1></div><div class="top-actions"><button class="icon-btn sync-status" id="syncStatus" data-state="${syncState}" title=""><span class="sync-dot"></span></button></div></header><div id="pageContent">${page()}</div></main></div>`;
   bind();
+  setSyncStatus(syncState);
 }
 function statsPage(){
   const sales=db.sales||[];
@@ -363,6 +375,7 @@ function bind(){
 }
 async function sync(){
   if(!API_URL||!session?.token)return;
+  setSyncStatus('pending');
   try{
     const r=await fetch(`${API_URL}?action=bootstrap&token=${encodeURIComponent(session.token)}`);
     const text=await r.text();
@@ -383,8 +396,11 @@ async function sync(){
       (db.sales||[]).forEach(s=>catalogAdd(s.productName,s.pack));
       db.products=inventoryFromData(x);
       save();render();
+      setSyncStatus('sync');
+    }else{
+      setSyncStatus('error');
     }
-  }catch(e){console.warn('sync unavailable',e)}
+  }catch(e){setSyncStatus('error');console.warn('sync unavailable',e)}
 }
 function stockSales(p){
   return (db.sales||[]).filter(s=>s.productName===p.name&&String(s.pack||'')===String(p.pack||'')&&(!p.warehouse||s.warehouse===p.warehouse)).reduce((a,s)=>({qty:a.qty+(+s.qty||0),total:a.total+(+s.total||0),profit:a.profit+(+s.profit||0)}),{qty:0,total:0,profit:0});
