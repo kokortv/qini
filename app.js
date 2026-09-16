@@ -1,20 +1,22 @@
 const CURRENCY={GEL:'₾',USD:'$',EUR:'€',UAH:'₴',RUB:'₽'};
 const API_URL=window.QINI_API_URL||'';
+const DB_KEY='qini-db-v2';
 try{
   const params=new URLSearchParams(location.search);
   if(params.has('reset')){
     localStorage.removeItem('qini-db');
+    localStorage.removeItem(DB_KEY);
     sessionStorage.removeItem('qini-session');
+    Object.keys(sessionStorage).forEach(k=>{if(k.startsWith('qini-menu-cache-'))sessionStorage.removeItem(k)});
     console.log('[qini] local data reset');
   }
 }catch(e){}
-const seed={auth:{login:'admin',password:'admin123',name:'Анна Иванова',phone:'+995 555 21 43 87'},page:'overview',users:[{id:'u1',login:'seller',password:'seller123',name:'Михаил Петров',phone:'+995 555 11 22 33',address:'Тбилиси',warehouses:['w1']}],suppliers:[{id:'s1',name:'Грин Маркет',phone:'+995 599 88 77 66',comment:'Овощи и бакалея'}],warehouses:[{id:'w1',name:'Основной склад',accountId:'a1',comment:'Тбилиси, ул. Пекина'}],accounts:[{id:'a1',name:'Основной счёт',currency:'GEL',payment:'Безналичный',initial:48000,balance:37250}],deliveries:[{id:'d1',date:'12.09.2026 10:42',supplier:'Грин Маркет',warehouse:'Основной склад',account:'Основной счёт',paid:1200,total:1280,items:[]}],writeoffs:[],products:[{name:'Кофе арабика',pack:'250 г',stock:46,cost:50,markup:30},{name:'Чай зелёный',pack:'100 г',stock:82,cost:16,markup:35},{name:'Шоколад тёмный',pack:'90 г',stock:17,cost:3.8,markup:42}]};
-let db=JSON.parse(localStorage.getItem('qini-db')||'null')||seed;
-db.auth={...seed.auth,...(db.auth||{})};
+// Пустая база. Все данные приходят только с сервера (или через оффлайн-режим).
+const emptyDb={auth:{login:'admin',password:'admin123',name:'Администратор',phone:''},page:'overview',users:[],suppliers:[],warehouses:[],accounts:[],deliveries:[],writeoffs:[],products:[],sales:[]};
+let db=JSON.parse(localStorage.getItem(DB_KEY)||'null')||JSON.parse(JSON.stringify(emptyDb));
+db.auth={...emptyDb.auth,...(db.auth||{})};
 db.page=db.page||'overview';
 db.users=db.users||[];db.suppliers=db.suppliers||[];db.warehouses=db.warehouses||[];db.accounts=db.accounts||[];db.deliveries=db.deliveries||[];db.writeoffs=db.writeoffs||[];db.products=db.products||[];db.sales=db.sales||[];
-if(!db.users.some(x=>x.login==='seller'))db.users.push(seed.users[0]);
-db.users=db.users.map(x=>({...x,login:x.login||('seller'+x.id),password:x.password||'seller123',warehouses:x.warehouses||[]}));
 function normalizeUser(x){
   let ids=x.warehouses||x.warehouseIds||[];
   if(typeof ids==='string'){try{ids=JSON.parse(ids)}catch(e){ids=ids.split(',').map(v=>v.trim()).filter(Boolean)}}
@@ -112,7 +114,7 @@ function setSyncStatus(state){
   const map={idle:'Не синхронизировано',pending:'Синхронизация…',sync:'Синхронизировано',error:'Ошибка синхронизации'};
   n.title=map[state]||'';
 }
-const save=()=>{db.products=inventoryFromData({Deliveries:db.deliveries,Writeoffs:db.writeoffs,Sales:db.sales});localStorage.setItem('qini-db',JSON.stringify(db))};
+const save=()=>{db.products=inventoryFromData({Deliveries:db.deliveries,Writeoffs:db.writeoffs,Sales:db.sales});localStorage.setItem(DB_KEY,JSON.stringify(db))};
 const money=(n,c='GEL')=>`${Number(n||0).toLocaleString('ru-RU',{maximumFractionDigits:2})} ${CURRENCY[c]||'₾'}`;
 const esc=(s='')=>String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
 const el=s=>document.querySelector(s);
@@ -124,6 +126,15 @@ function parseJsonResponse(text){
   if(t[0]==='<')return {ok:false,error:'Сервер вернул HTML вместо JSON. Проверьте URL /exec и доступ «Anyone».'};
   try{return JSON.parse(t)}catch(e){return {ok:false,error:'Некорректный ответ сервера: '+t.slice(0,120)}}
 }
+function handleSessionError(errorText){
+  if(!/сессия|session/i.test(errorText||''))return false;
+  session=null;
+  sessionStorage.removeItem('qini-session');
+  toast('Сессия истекла. Войдите снова.');
+  setSyncStatus('idle');
+  setTimeout(()=>render(),900);
+  return true;
+}
 async function api(action,entity,data){
   if(!API_URL)return {ok:false,error:'API_URL не настроен'};
   setSyncStatus('pending');
@@ -133,10 +144,8 @@ async function api(action,entity,data){
     const text=await r.text();
     result=parseJsonResponse(text);
   }catch(e){setSyncStatus('error');return {ok:false,error:'Сеть: '+e.message}}
-  if(!result.ok&&/сессия|session/i.test(result.error||'')){
-    session=null;sessionStorage.removeItem('qini-session');
-    toast('Сессия истекла. Войдите снова.');
-    setTimeout(()=>render(),900);
+  if(!result.ok&&handleSessionError(result.error)){
+    return result;
   }
   setSyncStatus(result.ok?'sync':'error');
   return result;
@@ -203,7 +212,11 @@ function page(){
 }
 function overview(){
   const rows=filterRows(db.deliveries);
-  return `<div class="kpi-grid"><div class="kpi"><div class="kpi-top">Остаток на счетах</div><div class="kpi-value">${money(db.accounts.reduce((a,x)=>a+x.balance,0))}</div><div class="kpi-note">↑ 8,4% к прошлому месяцу</div></div><div class="kpi"><div class="kpi-top">Товаров на складе</div><div class="kpi-value">${db.products.reduce((a,x)=>a+x.stock,0)} шт</div><div class="kpi-note">+12 за последние 7 дней</div></div><div class="kpi"><div class="kpi-top">Поставки за месяц</div><div class="kpi-value">${rows.length}</div><div class="kpi-note muted">На ${money(rows.reduce((a,d)=>a+d.total,0))}</div></div><div class="kpi"><div class="kpi-top">Текущий долг</div><div class="kpi-value">${money(rows.reduce((a,d)=>a+Math.max(d.total-d.paid,0),0))}</div><div class="kpi-note" style="color:var(--amber)">Требует внимания</div></div></div><div class="content-grid"><div class="card"><div class="card-head"><div><h3 class="card-title">Последние поставки</h3><div class="card-subtitle">Только доступные склады</div></div></div>${table(rows)}</div><div class="card"><div class="card-head"><h3 class="card-title">Популярные товары</h3></div><div class="bar-list">${db.products.slice(0,5).map((p,i)=>`<div class="bar-row"><span>${esc(p.name.split(' ')[0])}</span><div class="bar-bg"><div class="bar-fill" style="width:${90-i*18}%"></div></div><b>${90-i*18}%</b></div>`).join('')}</div></div></div>`;
+  const totalOnAccounts=db.accounts.reduce((a,x)=>a+Number(x.balance||0),0);
+  const totalStock=db.products.reduce((a,x)=>a+Number(x.stock||0),0);
+  const monthTotal=rows.reduce((a,d)=>a+Number(d.total||0),0);
+  const debtTotal=rows.reduce((a,d)=>a+Math.max(Number(d.total||0)-Number(d.paid||0),0),0);
+  return `<div class="kpi-grid"><div class="kpi"><div class="kpi-top">Остаток на счетах</div><div class="kpi-value">${money(totalOnAccounts)}</div><div class="kpi-note muted">По всем счетам</div></div><div class="kpi"><div class="kpi-top">Товаров на складе</div><div class="kpi-value">${totalStock} шт</div><div class="kpi-note muted">Все партии</div></div><div class="kpi"><div class="kpi-top">Поставок всего</div><div class="kpi-value">${rows.length}</div><div class="kpi-note muted">На ${money(monthTotal)}</div></div><div class="kpi"><div class="kpi-top">Текущий долг</div><div class="kpi-value">${money(debtTotal)}</div><div class="kpi-note muted">Перед поставщиками</div></div></div><div class="content-grid"><div class="card"><div class="card-head"><div><h3 class="card-title">Последние поставки</h3><div class="card-subtitle">Только доступные склады</div></div></div>${table(rows)}</div><div class="card"><div class="card-head"><h3 class="card-title">Популярные товары</h3></div>${db.products.length?`<div class="bar-list">${db.products.slice(0,5).map((p,i)=>`<div class="bar-row"><span>${esc(p.name.split(' ')[0])}</span><div class="bar-bg"><div class="bar-fill" style="width:${90-i*18}%"></div></div><b>${90-i*18}%</b></div>`).join('')}</div>`:'<div class="empty"><div class="empty-icon">◫</div><div class="card-subtitle">Нет товаров</div></div>'}</div></div>`;
 }
 function deliveryEarned(d){return (db.sales||[]).filter(s=>String(s.deliveryId)===String(d.id)).reduce((a,s)=>a+(Number(s.profit)||0),0)}
 function table(rows){
@@ -398,9 +411,15 @@ async function sync(){
       save();render();
       setSyncStatus('sync');
     }else{
+      // Если сессия истекла — выходим на экран логина, а не красный кружок.
+      if(handleSessionError(p.error)){return}
       setSyncStatus('error');
+      toast('Ошибка синхронизации: '+(p.error||'сервер вернул ошибку'));
     }
-  }catch(e){setSyncStatus('error');console.warn('sync unavailable',e)}
+  }catch(e){
+    setSyncStatus('error');
+    toast('Ошибка синхронизации: '+e.message);
+  }
 }
 function stockSales(p){
   return (db.sales||[]).filter(s=>s.productName===p.name&&String(s.pack||'')===String(p.pack||'')&&(!p.warehouse||s.warehouse===p.warehouse)).reduce((a,s)=>({qty:a.qty+(+s.qty||0),total:a.total+(+s.total||0),profit:a.profit+(+s.profit||0)}),{qty:0,total:0,profit:0});
