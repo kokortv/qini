@@ -432,7 +432,13 @@ function normalizeSearch(s){
   try{
     return String(s||'')
       .normalize('NFKC')
-      .replace(/[\u200B-\u200D\uFEFF\u00A0]/g,' ')
+      // Скрытые символы, которые надо вырезать без замены на пробел:
+      // 00AD мягкий перенос, 200B..200F zero-width/LRM/RLM,
+      // 2028/2029 разделители строк, 202F узкий NBSP, 205F мат.пробел,
+      // 2060 word joiner, FEFF BOM
+      .replace(/[\u00AD\u200B-\u200F\u2028\u2029\u202F\u205F\u2060\uFEFF]/g,'')
+      // NBSP и обычные пробелы → обычный пробел
+      .replace(/[\u00A0\u1680\u2000-\u200A\u3000]/g,' ')
       .toLowerCase()
       .replace(/ё/g,'е')
       .replace(/[^\p{L}\p{N}]+/gu,' ')
