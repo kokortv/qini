@@ -136,7 +136,7 @@ input[type=number]{-moz-appearance:textfield}
 .cost-amount{color:#b77a1b!important;font-weight:800!important}
 .retail-amount{color:var(--purple)!important;font-weight:800!important}
 .debt-amount{color:var(--red)!important;font-weight:800!important}
-.line-head,.line-item{grid-template-columns:minmax(170px,1.5fr) minmax(90px,.8fr) minmax(80px,.55fr) minmax(100px,.8fr) minmax(100px,.85fr) minmax(75px,.65fr) minmax(115px,.95fr) 30px}
+.line-head,.line-item{grid-template-columns:minmax(140px,1.2fr) minmax(65px,.55fr) minmax(85px,.75fr) minmax(70px,.45fr) minmax(95px,.8fr) minmax(100px,.85fr) minmax(65px,.55fr) minmax(110px,.9fr) 30px}
 .line-item .input{font-size:11px;padding:8px 7px}
 .profit-amount{color:#198754!important;font-weight:800!important}
 .line-item .pack-custom{min-width:100px}

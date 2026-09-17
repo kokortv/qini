@@ -251,10 +251,10 @@ function lineHtml(item={},kind='delivery'){
   const retail=item.retailTotal||cost*(1+(Math.round(item.markup||30))/100);
   const packs=catalogPacks(item.name);
   const custom=item.pack&&!packs.includes(item.pack);
-  return `<div class="line-item item-line"><input class="input" name="itemName" list="qini-products" value="${esc(item.name||'')}" placeholder="Название товара"><select class="select" name="pack">${packOptionsHtml(packs,item.pack,custom)}</select><input class="input pack-custom" name="packCustom" value="${custom?esc(item.pack):''}" placeholder="Введите фасовку" style="display:${custom?'block':'none'}"><input class="input" name="qty" type="number" step="any" value="${item.qty||''}" placeholder="Количество"><input class="input" name="cost" type="number" step="any" value="${item.cost||''}" placeholder="Цена / себестоимость"><input class="input calculated-cost" name="costTotal" type="number" step="any" value="${cost||0}" readonly><input class="input markup-field" name="markup" type="number" min="0" step="1" value="${Math.round(item.markup||30)}" placeholder="Наценка %"><input class="input calculated-retail" name="retailTotal" type="number" step="any" value="${retail||0}" placeholder="Сумма с наценкой"><button type="button" class="remove-line">×</button></div>`;
+  return `<div class="line-item item-line"><input class="input" name="itemName" list="qini-products" value="${esc(item.name||'')}" placeholder="Название товара"><input class="input" name="packWeight" value="${esc(item.packWeight||'')}" placeholder="Вес/Упак"><select class="select" name="pack">${packOptionsHtml(packs,item.pack,custom)}</select><input class="input pack-custom" name="packCustom" value="${custom?esc(item.pack):''}" placeholder="Введите фасовку" style="display:${custom?'block':'none'}"><input class="input" name="qty" type="number" step="any" value="${item.qty||''}" placeholder="Количество"><input class="input" name="cost" type="number" step="any" value="${item.cost||''}" placeholder="Цена / себестоимость"><input class="input calculated-cost" name="costTotal" type="number" step="any" value="${cost||0}" readonly><input class="input markup-field" name="markup" type="number" min="0" step="1" value="${Math.round(item.markup||30)}" placeholder="Наценка %"><input class="input calculated-retail" name="retailTotal" type="number" step="any" value="${retail||0}" placeholder="Сумма с наценкой"><button type="button" class="remove-line">×</button></div>`;
 }
 function lineHeaderHtml(){
-  return `<div class="line-head"><div>Товар</div><div>Фасовка</div><div>Кол-во</div><div>Себестоимость</div><div>Сумма</div><div>Наценка, %</div><div>С наценкой</div><div></div></div>`;
+  return `<div class="line-head"><div>Товар</div><div>Вес/Упак</div><div>Фасовка</div><div>Кол-во</div><div>Себестоимость</div><div>Сумма</div><div>Наценка, %</div><div>С наценкой</div><div></div></div>`;
 }
 function productDatalist(){return `<datalist id="qini-products">${catalogNames().map(n=>`<option value="${esc(n)}"></option>`).join('')}</datalist>`}
 function deliveryForm(id){
@@ -281,8 +281,9 @@ function collectItems(form){
     const typedMarkup=+(row.querySelector('[name=markup]')?.value||30);
     const packSelect=row.querySelector('[name=pack]')?.value||'';
     const pack=packSelect==='__custom__'?(row.querySelector('[name=packCustom]')?.value||''):packSelect;
+    const packWeight=(row.querySelector('[name=packWeight]')?.value||'').trim();
     const m=retail&&qty&&cost?((retail/(qty*cost))-1)*100:typedMarkup;
-    return {name:row.querySelector('[name=itemName]')?.value||'',pack,qty,cost,markup:Math.round(m||0),retailTotal:retail};
+    return {name:row.querySelector('[name=itemName]')?.value||'',pack,packWeight,qty,cost,markup:Math.round(m||0),retailTotal:retail};
   }).filter(x=>x.name||x.qty);
 }
 function bindLineRemove(){document.querySelectorAll('.remove-line').forEach(b=>b.onclick=()=>{if(document.querySelectorAll('.item-line').length>1)b.closest('.item-line').remove()})}
@@ -411,7 +412,6 @@ async function sync(){
       save();render();
       setSyncStatus('sync');
     }else{
-      // Если сессия истекла — выходим на экран логина, а не красный кружок.
       if(handleSessionError(p.error)){return}
       setSyncStatus('error');
       toast('Ошибка синхронизации: '+(p.error||'сервер вернул ошибку'));
@@ -435,9 +435,14 @@ function decorateStock(){
   ];
   tr.innerHTML=labels.map(x=>`<th title="${x.title}">${x.t}</th>`).join('');
   const q=stockFilter.trim().toLowerCase();
-  const list=q?db.products.filter(p=>(p.name||'').toLowerCase().includes(q)||(p.pack||'').toLowerCase().includes(q)||(p.warehouse||'').toLowerCase().includes(q)||(p.supplier||'').toLowerCase().includes(q)):db.products;
+  const norm=s=>String(s||'').toLowerCase().replace(/ё/g,'е');
+  const tokens=q?q.split(/\s+/).filter(Boolean).map(norm):[];
+  const list=tokens.length?db.products.filter(p=>{
+    const hay=norm([p.name,p.pack,p.warehouse,p.supplier,p.deliveryDate].filter(Boolean).join(' '));
+    return tokens.every(t=>hay.includes(t));
+  }):db.products;
   const tbody=table.querySelector('tbody');
-  if(!list.length){tbody.innerHTML=`<tr><td colspan="10"><div class="empty"><div class="empty-icon">◫</div><div class="card-subtitle">${q?'Ничего не найдено':'Остатков пока нет'}</div></div></td></tr>`;return}
+  if(!list.length){tbody.innerHTML=`<tr><td colspan="10"><div class="empty"><div class="empty-icon">◫</div><div class="card-subtitle">${tokens.length?'Ничего не найдено':'Остатков пока нет'}</div></div></td></tr>`;return}
   tbody.innerHTML=list.map(p=>{
     const idx=db.products.indexOf(p);
     const unit=p.cost*(1+p.markup/100);
@@ -460,8 +465,8 @@ function decorateStock(){
 }
 function showDeliveryItems(id){
   const d=db.deliveries.find(x=>String(x.id)===String(id));if(!d)return;
-  const rows=(d.items||[]).map(i=>`<tr><td>${esc(i.name)}</td><td>${esc(i.pack)}</td><td>${i.qty}</td><td>${money(i.cost)}</td><td>${money(i.qty*i.cost)}</td><td>${fmtPct(i.markup)}</td><td>${money(i.qty*i.cost*(1+(i.markup||0)/100))}</td></tr>`).join('');
-  document.body.insertAdjacentHTML('beforeend',`<div class="modal-backdrop" id="itemsModal"><div class="modal"><div class="modal-head"><div><h2 class="modal-title">Товары в поставке</h2><div class="modal-desc">${displayDate(d.date)} · ${esc(d.supplier||'')} · ${esc(d.warehouse||'')}</div></div><button class="close" id="closeItems">×</button></div><div class="table-wrap"><table class="table"><thead><tr><th>Название</th><th>Фасовка</th><th>Количество</th><th>Себестоимость</th><th>Сумма</th><th>Наценка</th><th>Сумма с наценкой</th></tr></thead><tbody>${rows||'<tr><td colspan="7"><div class="empty">Товары не найдены</div></td></tr>'}</tbody></table></div></div></div>`);
+  const rows=(d.items||[]).map(i=>`<tr><td>${esc(i.name)}</td><td>${esc(i.packWeight||'')}</td><td>${esc(i.pack)}</td><td>${i.qty}</td><td>${money(i.cost)}</td><td>${money(i.qty*i.cost)}</td><td>${fmtPct(i.markup)}</td><td>${money(i.qty*i.cost*(1+(i.markup||0)/100))}</td></tr>`).join('');
+  document.body.insertAdjacentHTML('beforeend',`<div class="modal-backdrop" id="itemsModal"><div class="modal"><div class="modal-head"><div><h2 class="modal-title">Товары в поставке</h2><div class="modal-desc">${displayDate(d.date)} · ${esc(d.supplier||'')} · ${esc(d.warehouse||'')}</div></div><button class="close" id="closeItems">×</button></div><div class="table-wrap"><table class="table"><thead><tr><th>Название</th><th>Вес/Упак</th><th>Фасовка</th><th>Количество</th><th>Себестоимость</th><th>Сумма</th><th>Наценка</th><th>Сумма с наценкой</th></tr></thead><tbody>${rows||'<tr><td colspan="8"><div class="empty">Товары не найдены</div></td></tr>'}</tbody></table></div></div></div>`);
   el('#closeItems').onclick=()=>el('#itemsModal').remove();
 }
 function decorateDeliveryActions(){
@@ -511,7 +516,7 @@ async function deleteRecord(type,id){
 function openSaleModal(p){
   const accountId=db.warehouses.find(w=>w.name===p.warehouse)?.accountId||'';
   const deliveryInfo=p.deliveryDate?`Поставка: ${displayDate(p.deliveryDate)}${p.supplier?' · '+esc(p.supplier):''}`:'Партия без поставки';
-  document.body.insertAdjacentHTML('beforeend',`<div class="modal-backdrop" id="saleModal"><div class="modal"><div class="modal-head"><div><h2 class="modal-title">Продажа товара</h2><div class="modal-desc">${esc(p.name)} · ${esc(p.pack)} · ${esc(p.warehouse||'')} · ${deliveryInfo}</div></div><button class="close" id="closeSale">×</button></div><form class="form" id="saleForm"><div class="form-grid"><div class="field"><label class="label">Дата и время</label><input class="input" name="date" type="datetime-local" value="${nowLocal()}" required></div><div class="field"><label class="label">Количество</label><input class="input" name="qty" type="number" min="0.01" max="${p.stock}" step="any" required></div><div class="field"><label class="label">Наценка, %</label><input class="input" name="markup" type="number" min="0" step="1" value="${Math.round(p.markup||0)}" required></div><div class="field"><label class="label">Цена продажи за единицу</label><input class="input" name="unitPrice" type="number" step="any" value="${(p.cost*(1+Math.round(p.markup||0)/100)).toFixed(2)}" required></div><div class="field full"><label class="label">Комментарий</label><input class="input" name="comment" placeholder="Необязательно"></div></div><div class="summary-row"><div><div class="summary-label">Сумма продажи</div><div class="summary-value retail-amount" id="saleTotal">0</div></div><div><div class="summary-label">Заработано</div><div class="summary-value profit-amount" id="saleProfit">0</div></div></div><div class="modal-foot"><button type="button" class="btn btn-light" id="closeSale2">Отмена</button><button class="btn btn-primary">Добавить продажу</button></div></form></div></div>`);
+  document.body.insertAdjacentHTML('beforeend',`<div class="modal-backdrop" id="saleModal"><div class="modal"><div class="modal-head"><div><h2 class="modal-title">Продажа товара</h2><div class="modal-desc">${esc(p.name)} · ${esc(p.pack)} · ${esc(p.warehouse||'')} · ${deliveryInfo}</div></div><button class="close" id="closeSale">×</button></div><form class="form" id="saleForm"><div class="form-grid"><div class="field"><label class="label">Дата и время</label><input class="input" name="date" type="datetime-local" value="${nowLocal()}" required></div><div class="field"><label class="label">Количество</label><input class="input" name="qty" type="number" min="0.01" step="any" max="${p.stock}" required></div><div class="field"><label class="label">Наценка, %</label><input class="input" name="markup" type="number" min="0" step="1" value="${Math.round(p.markup||0)}" required></div><div class="field"><label class="label">Цена продажи за единицу</label><input class="input" name="unitPrice" type="number" step="any" value="${(p.cost*(1+Math.round(p.markup||0)/100)).toFixed(2)}" required></div><div class="field full"><label class="label">Комментарий</label><input class="input" name="comment" placeholder="Необязательно"></div></div><div class="summary-row"><div><div class="summary-label">Сумма продажи</div><div class="summary-value retail-amount" id="saleTotal">0</div></div><div><div class="summary-label">Заработано</div><div class="summary-value profit-amount" id="saleProfit">0</div></div></div><div class="modal-foot"><button type="button" class="btn btn-light" id="closeSale2">Отмена</button><button class="btn btn-primary">Добавить продажу</button></div></form></div></div>`);
   const close=()=>el('#saleModal')?.remove();
   el('#closeSale').onclick=close;
   el('#closeSale2').onclick=close;
@@ -597,7 +602,7 @@ function openMenuDialog(){
 function openCreateMenu(){
   const products=(db.products||[]).filter(p=>p.stock>0);
   if(!products.length){toast('Нет товаров в остатках');return}
-  const rows=products.map((p,i)=>`<label style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid #f1f2f6;cursor:pointer"><input type="checkbox" name="pick" value="${i}" checked style="width:16px;height:16px;accent-color:#7868ee"><span style="flex:1;font-size:13px;font-weight:600;color:#202432">${esc(p.name)}${p.pack?' <span style="color:#8c93a5;font-weight:400">· '+esc(p.pack)+'</span>':''}</span><span style="font-weight:700;color:#7868ee;font-size:13px;white-space:nowrap">${money(p.cost*(1+p.markup/100))}</span></label>`).join('');
+  const rows=products.map((p,i)=>`<label style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid #f1f2f6;cursor:pointer"><input type="checkbox" name="pick" value="${i}" checked style="width:16px;height:16px;accent-color:#7868ee"><span style="flex:1;font-size:13px;font-weight:600;color:#202432">${esc(p.name)}${p.pack?' <span style="color:#8c93a5;font-weight:400">· '+esc(p.pack)+'</span>':''}</span><span style="font-weight:700;color:#7868ee;font-size:13px;white-space:nowrap">${money(Math.round(p.cost*(1+p.markup/100)))}</span></label>`).join('');
   document.body.insertAdjacentHTML('beforeend',`<div class="modal-backdrop" id="menuModal"><div class="modal" style="width:min(620px,100%)"><div class="modal-head"><div><h2 class="modal-title">Создать меню</h2><div class="modal-desc">Отметьте товары — сгенерируется ссылка для отправки</div></div><button class="close" id="closeMenu">×</button></div><form class="form" id="menuForm"><div class="form-grid"><div class="field full"><label class="label">Название меню</label><input class="input" name="title" value="Меню" placeholder="Например: Меню на сегодня" required></div><div class="field full"><label class="label">Товары (${products.length})</label><div style="max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:12px">${rows}</div></div></div><div class="modal-foot"><button type="button" class="btn btn-light" id="closeMenu2">Отмена</button><button class="btn btn-primary" type="submit">Создать ссылку</button></div></form></div></div>`);
   const close=()=>el('#menuModal')?.remove();
   el('#closeMenu').onclick=close;
@@ -610,7 +615,7 @@ function openCreateMenu(){
     const f=new FormData(e.target);
     const picks=f.getAll('pick').map(x=>+x);
     if(!picks.length){toast('Выберите хотя бы один товар');if(submit){submit.disabled=false;submit.classList.remove('is-loading');submit.textContent=orig}return}
-    const items=picks.map(i=>{const p=products[i];return {n:p.name,p:p.pack,pr:+((p.cost*(1+p.markup/100)).toFixed(2))}});
+    const items=picks.map(i=>{const p=products[i];return {n:p.name,p:p.pack,pr:Math.round(p.cost*(1+p.markup/100))}});
     const title=(f.get('title')||'Меню').trim();
     const menu={title,items,ts:Date.now()};
     const prev=getLastMenu();
