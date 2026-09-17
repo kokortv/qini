@@ -237,9 +237,13 @@ function form(type,id){
 function nowLocal(){const d=new Date();d.setMinutes(d.getMinutes()-d.getTimezoneOffset());return d.toISOString().slice(0,16)}
 function inputDate(value){
   if(!value)return nowLocal();
-  if(value.includes('T'))return value.slice(0,16);
-  const m=value.match(/(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})/);
-  return m?`${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}`:nowLocal();
+  const s=String(value);
+  if(s.includes('T'))return s.slice(0,16);
+  let m=s.match(/(\d{2})\.(\d{2})\.(\d{4})[,\s]*(\d{2}):(\d{2})/);
+  if(m)return `${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}`;
+  m=s.match(/(\d{4})-(\d{2})-(\d{2})[T\s]+(\d{2}):(\d{2})/);
+  if(m)return `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}`;
+  return nowLocal();
 }
 function packOptionsHtml(packs,currentPack,custom){
   return `<option value="" disabled hidden ${!currentPack&&!custom?'selected':''}></option>`+
@@ -466,7 +470,7 @@ function decorateStock(){
 function showDeliveryItems(id){
   const d=db.deliveries.find(x=>String(x.id)===String(id));if(!d)return;
   const rows=(d.items||[]).map(i=>`<tr><td>${esc(i.name)}</td><td>${esc(i.packWeight||'')}</td><td>${esc(i.pack)}</td><td>${i.qty}</td><td>${money(i.cost)}</td><td>${money(i.qty*i.cost)}</td><td>${fmtPct(i.markup)}</td><td>${money(i.qty*i.cost*(1+(i.markup||0)/100))}</td></tr>`).join('');
-  document.body.insertAdjacentHTML('beforeend',`<div class="modal-backdrop" id="itemsModal"><div class="modal"><div class="modal-head"><div><h2 class="modal-title">Товары в поставке</h2><div class="modal-desc">${displayDate(d.date)} · ${esc(d.supplier||'')} · ${esc(d.warehouse||'')}</div></div><button class="close" id="closeItems">×</button></div><div class="table-wrap"><table class="table"><thead><tr><th>Название</th><th>Вес/Упак</th><th>Фасовка</th><th>Количество</th><th>Себестоимость</th><th>Сумма</th><th>Наценка</th><th>Сумма с наценкой</th></tr></thead><tbody>${rows||'<tr><td colspan="8"><div class="empty">Товары не найдены</div></td></tr>'}</tbody></table></div></div></div>`);
+  document.body.insertAdjacentHTML('beforeend',`<div class="modal-backdrop" id="itemsModal"><div class="modal items-modal"><div class="modal-head"><div><h2 class="modal-title">Товары в поставке</h2><div class="modal-desc">${displayDate(d.date)} · ${esc(d.supplier||'')} · ${esc(d.warehouse||'')}</div></div><button class="close" id="closeItems">×</button></div><div class="table-wrap"><table class="table"><thead><tr><th>Название</th><th>Вес/Упак</th><th>Фасовка</th><th>Количество</th><th>Себестоимость</th><th>Сумма</th><th>Наценка</th><th>Сумма с наценкой</th></tr></thead><tbody>${rows||'<tr><td colspan="8"><div class="empty">Товары не найдены</div></td></tr>'}</tbody></table></div></div></div>`);
   el('#closeItems').onclick=()=>el('#itemsModal').remove();
 }
 function decorateDeliveryActions(){

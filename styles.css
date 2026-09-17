@@ -151,3 +151,9 @@ input[type=number]{-moz-appearance:textfield}
 .sync-status[data-state="error"] .sync-dot{background:var(--red);box-shadow:0 0 0 4px rgba(237,113,128,.2)}
 .sync-status[data-state="idle"] .sync-dot{background:#c8ccd6}
 @keyframes qini-pulse{0%,100%{opacity:1}50%{opacity:.55}}
+/* Окно товаров в поставке — без горизонтального скролла */
+.modal.items-modal{width:min(1100px,100%);overflow-x:hidden}
+.modal.items-modal .table{min-width:0}
+.modal.items-modal .table th,
+.modal.items-modal .table td{padding:10px 12px;font-size:12px}
+.modal.items-modal .table-wrap{overflow-x:auto}
