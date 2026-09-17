@@ -461,7 +461,7 @@ function decorateStock(){
   const q=normalizeSearch(stockFilter);
   const tokens=q?q.split(' ').filter(Boolean):[];
   const list=tokens.length?db.products.filter(p=>{
-    const hay=normalizeSearch([p.name,p.pack,p.packWeight,p.warehouse,p.supplier].filter(Boolean).join(' '));
+    const hay=normalizeSearch([p.name,p.pack,p.packWeight].filter(Boolean).join(' '));
     return tokens.every(t=>hay.includes(t));
   }):db.products;
   if(tokens.length&&!list.length){
