@@ -428,6 +428,20 @@ async function sync(){
 function stockSales(p){
   return (db.sales||[]).filter(s=>s.productName===p.name&&String(s.pack||'')===String(p.pack||'')&&(!p.warehouse||s.warehouse===p.warehouse)).reduce((a,s)=>({qty:a.qty+(+s.qty||0),total:a.total+(+s.total||0),profit:a.profit+(+s.profit||0)}),{qty:0,total:0,profit:0});
 }
+function normalizeSearch(s){
+  try{
+    return String(s||'')
+      .normalize('NFKC')
+      .replace(/[\u200B-\u200D\uFEFF\u00A0]/g,' ')
+      .toLowerCase()
+      .replace(/ё/g,'е')
+      .replace(/[^\p{L}\p{N}]+/gu,' ')
+      .replace(/\s+/g,' ')
+      .trim();
+  }catch(e){
+    return String(s||'').toLowerCase().replace(/ё/g,'е').replace(/\s+/g,' ').trim();
+  }
+}
 function decorateStock(){
   const table=document.querySelector('.table');if(!table)return;
   const tr=table.querySelector('thead tr');
@@ -438,13 +452,15 @@ function decorateStock(){
     {t:'Цена',title:'Цена с наценкой за единицу'},{t:'Итого',title:'Итого с наценкой (цена × остаток)'},{t:'',title:''}
   ];
   tr.innerHTML=labels.map(x=>`<th title="${x.title}">${x.t}</th>`).join('');
-  const q=stockFilter.trim().toLowerCase();
-  const norm=s=>String(s||'').toLowerCase().replace(/ё/g,'е');
-  const tokens=q?q.split(/\s+/).filter(Boolean).map(norm):[];
+  const q=normalizeSearch(stockFilter);
+  const tokens=q?q.split(' ').filter(Boolean):[];
   const list=tokens.length?db.products.filter(p=>{
-    const hay=norm([p.name,p.pack,p.warehouse,p.supplier,p.deliveryDate].filter(Boolean).join(' '));
+    const hay=normalizeSearch([p.name,p.pack,p.packWeight,p.warehouse,p.supplier].filter(Boolean).join(' '));
     return tokens.every(t=>hay.includes(t));
   }):db.products;
+  if(tokens.length&&!list.length){
+    console.log('[qini] поиск не дал результатов. Запрос:',q,'| Что ищем:',tokens,'| Все товары:',db.products.map(p=>({name:p.name,pack:p.pack,packWeight:p.packWeight})));
+  }
   const tbody=table.querySelector('tbody');
   if(!list.length){tbody.innerHTML=`<tr><td colspan="10"><div class="empty"><div class="empty-icon">◫</div><div class="card-subtitle">${tokens.length?'Ничего не найдено':'Остатков пока нет'}</div></div></td></tr>`;return}
   tbody.innerHTML=list.map(p=>{
