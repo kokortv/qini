@@ -184,6 +184,54 @@ const navS=[['deliveries','⇄','Поставки'],['writeoffs','↘','Спис
 const titles={overview:['Добрый день','Сводка по вашему бизнесу'],sellers:['Продавцы','Команда и доступ к складам'],suppliers:['Поставщики','Контакты и история сотрудничества'],warehouses:['Склады','Точки хранения и счета'],accounts:['Счета','Баланс и способы оплаты'],deliveries:['Поставки','Входящие поставки и расчёты'],writeoffs:['Списания','Учет движения товаров'],stock:['Остатки','Товары на складах'],stats:['Статистика','Продажи и динамика']};
 const allowed=()=>session.role==='seller'?db.warehouses.filter(w=>session.warehouses?.includes(w.id)).map(w=>w.name):db.warehouses.map(w=>w.name);
 const filterRows=a=>session.role==='seller'?a.filter(x=>!x.warehouse||allowed().includes(x.warehouse)):a;
+
+let statsFilter={preset:'all',from:'',to:''};
+
+function parseDateValue(v){
+  if(!v)return null;
+  const s=String(v);
+  let m=s.match(/(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})/);
+  if(m)return new Date(+m[1],+m[2]-1,+m[3],+m[4],+m[5]);
+  m=s.match(/(\d{2})\.(\d{2})\.(\d{4})[,\s]+(\d{2}):(\d{2})/);
+  if(m)return new Date(+m[3],+m[2]-1,+m[1],+m[4],+m[5]);
+  const d=new Date(s);
+  return Number.isNaN(d.getTime())?null:d;
+}
+
+function filterSalesByRange(sales){
+  const preset=statsFilter.preset;
+  if(preset==='all')return sales;
+  const now=new Date();
+  let from=null,to=null;
+  if(preset==='today'){
+    from=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+    to=new Date(now.getFullYear(),now.getMonth(),now.getDate(),23,59,59,999);
+  }else if(preset==='week'){
+    const d=new Date(now);const day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);
+    from=new Date(d.getFullYear(),d.getMonth(),d.getDate());
+    to=new Date(now.getFullYear(),now.getMonth(),now.getDate(),23,59,59,999);
+  }else if(preset==='month'){
+    from=new Date(now.getFullYear(),now.getMonth(),1);
+    to=new Date(now.getFullYear(),now.getMonth(),now.getDate(),23,59,59,999);
+  }else if(preset==='custom'){
+    if(statsFilter.from){
+      const p=statsFilter.from.split('-').map(Number);
+      from=new Date(p[0],p[1]-1,p[2]);
+    }
+    if(statsFilter.to){
+      const p=statsFilter.to.split('-').map(Number);
+      to=new Date(p[0],p[1]-1,p[2],23,59,59,999);
+    }
+  }
+  return sales.filter(s=>{
+    const dt=parseDateValue(s.date);
+    if(!dt)return false;
+    if(from&&dt<from)return false;
+    if(to&&dt>to)return false;
+    return true;
+  });
+}
+
 function render(){
   if(!session)return login();
   const nav=session.role==='admin'?navA:navS,t=titles[db.page]||titles.overview;
@@ -192,7 +240,8 @@ function render(){
   setSyncStatus(syncState);
 }
 function statsPage(){
-  const sales=db.sales||[];
+  const allSales=db.sales||[];
+  const sales=filterSalesByRange(allSales);
   const total=sales.reduce((a,s)=>a+(Number(s.total)||0),0);
   const profit=sales.reduce((a,s)=>a+(Number(s.profit)||0),0);
   const isCash=s=>(s.payment||'').toLowerCase().includes('нал');
@@ -202,7 +251,11 @@ function statsPage(){
   const cashCount=sales.filter(isCash).length;
   const cardCount=sales.filter(isCard).length;
   const paymentLabel=v=>v?v:'—';
-  return `<div class="kpi-grid"><div class="kpi"><div class="kpi-top">Сумма всех продаж</div><div class="kpi-value retail-amount">${money(total)}</div><div class="kpi-note muted">${sales.length} ${sales.length===1?'продажа':'продаж'}</div></div><div class="kpi"><div class="kpi-top">Общий заработок</div><div class="kpi-value profit-amount">${money(profit)}</div><div class="kpi-note muted">Продажи минус себестоимость</div></div><div class="kpi"><div class="kpi-top">Оплачено наличными</div><div class="kpi-value">${money(cashTotal)}</div><div class="kpi-note muted">${cashCount} ${cashCount===1?'продажа':'продаж'}</div></div><div class="kpi"><div class="kpi-top">Оплачено картой</div><div class="kpi-value">${money(cardTotal)}</div><div class="kpi-note muted">${cardCount} ${cardCount===1?'продажа':'продаж'}</div></div></div><div class="card"><div class="card-head"><div><h3 class="card-title">Статистика продаж</h3><div class="card-subtitle">Каждая продажа отдельной строкой</div></div><select class="select" style="max-width:180px"><option>Все время</option><option>Сегодня</option><option>Неделя</option><option>Месяц</option></select></div>${sales.length?`<div class="table-wrap"><table class="table"><thead><tr><th>Дата и время</th><th>Товар</th><th>Фасовка</th><th>Количество</th><th>Наценка</th><th>Оплата</th><th>Сумма продажи</th><th>Заработано</th><th>Комментарий</th>${session.role==='admin'?'<th>Действия</th>':''}</tr></thead><tbody>${sales.map(s=>`<tr><td>${displayDate(s.date)}</td><td>${esc(s.productName||'')}</td><td>${esc(s.pack||'')}</td><td>${s.qty||0}</td><td>${fmtPct(s.markup)}</td><td>${esc(paymentLabel(s.payment))}</td><td class="retail-amount">${money(s.total)}</td><td class="profit-amount">${money(s.profit)}</td><td>${esc(s.comment||'')}</td>${session.role==='admin'?`<td><button class="action-btn danger" data-delete="sales:${s.id}">⌫</button></td>`:''}</tr>`).join('')}</tbody></table></div>`:'<div class="empty"><div class="empty-icon">◔</div><h3 class="card-title">Продаж пока нет</h3><div class="card-subtitle">Добавьте продажу из раздела «Остатки»</div></div>'}</div>`;
+  const presetLabels={all:'Все время',today:'Сегодня',week:'Неделя',month:'Месяц',custom:'Период'};
+  const options=['all','today','week','month','custom'].map(k=>`<option value="${k}" ${statsFilter.preset===k?'selected':''}>${presetLabels[k]}</option>`).join('');
+  const customInputs=statsFilter.preset==='custom'?`<input class="input" type="date" id="statsFrom" value="${statsFilter.from}" style="max-width:150px"><input class="input" type="date" id="statsTo" value="${statsFilter.to}" style="max-width:150px">`:'';
+  const subtitle=statsFilter.preset==='all'?`${sales.length} ${sales.length===1?'продажа':'продаж'}`:`${sales.length} ${sales.length===1?'продажа':'продаж'} из ${allSales.length}`;
+  return `<div class="kpi-grid"><div class="kpi"><div class="kpi-top">Сумма всех продаж</div><div class="kpi-value retail-amount">${money(total)}</div><div class="kpi-note muted">${subtitle}</div></div><div class="kpi"><div class="kpi-top">Общий заработок</div><div class="kpi-value profit-amount">${money(profit)}</div><div class="kpi-note muted">Продажи минус себестоимость</div></div><div class="kpi"><div class="kpi-top">Оплачено наличными</div><div class="kpi-value">${money(cashTotal)}</div><div class="kpi-note muted">${cashCount} ${cashCount===1?'продажа':'продаж'}</div></div><div class="kpi"><div class="kpi-top">Оплачено картой</div><div class="kpi-value">${money(cardTotal)}</div><div class="kpi-note muted">${cardCount} ${cardCount===1?'продажа':'продаж'}</div></div></div><div class="card"><div class="card-head"><div><h3 class="card-title">Статистика продаж</h3><div class="card-subtitle">Каждая продажа отдельной строкой</div></div><div class="filter-row"><select class="select" id="statsPreset" style="max-width:150px">${options}</select>${customInputs}</div></div>${sales.length?`<div class="table-wrap"><table class="table"><thead><tr><th>Дата и время</th><th>Товар</th><th>Фасовка</th><th>Количество</th><th>Наценка</th><th>Оплата</th><th>Сумма продажи</th><th>Заработано</th><th>Комментарий</th>${session.role==='admin'?'<th>Действия</th>':''}</tr></thead><tbody>${sales.map(s=>`<tr><td>${displayDate(s.date)}</td><td>${esc(s.productName||'')}</td><td>${esc(s.pack||'')}</td><td>${s.qty||0}</td><td>${fmtPct(s.markup)}</td><td>${esc(paymentLabel(s.payment))}</td><td class="retail-amount">${money(s.total)}</td><td class="profit-amount">${money(s.profit)}</td><td>${esc(s.comment||'')}</td>${session.role==='admin'?`<td><button class="action-btn danger" data-delete="sales:${s.id}">⌫</button></td>`:''}</tr>`).join('')}</tbody></table></div>`:'<div class="empty"><div class="empty-icon">◔</div><h3 class="card-title">Продаж пока нет</h3><div class="card-subtitle">Добавьте продажу из раздела «Остатки» или измените период</div></div>'}</div>`;
 }
 function page(){
   if(db.page==='overview')return overview();
@@ -431,6 +484,8 @@ async function sync(){
     toast('Ошибка синхронизации: '+e.message);
   }
 }
+let stockSort={key:'name',dir:'asc'};
+
 function stockSales(p){
   return (db.sales||[]).filter(s=>s.productName===p.name&&String(s.pack||'')===String(p.pack||'')&&(!p.warehouse||s.warehouse===p.warehouse)).reduce((a,s)=>({qty:a.qty+(+s.qty||0),total:a.total+(+s.total||0),profit:a.profit+(+s.profit||0)}),{qty:0,total:0,profit:0});
 }
@@ -452,19 +507,55 @@ function normalizeSearch(s){
 function decorateStock(){
   const table=document.querySelector('.table');if(!table)return;
   const tr=table.querySelector('thead tr');
-  const labels=[
-    {t:'Товар',title:'Товар'},{t:'Склад',title:'Склад'},{t:'Партия',title:'Партия — дата и поставщик поставки'},
-    {t:'Ост.',title:'Остаток на складе'},{t:'Себес.',title:'Себестоимость за единицу'},
-    {t:'Закуп',title:'Сумма по себестоимости (себестоимость × остаток)'},{t:'Нц.',title:'Наценка, % (целое число)'},
-    {t:'Цена',title:'Цена с наценкой за единицу'},{t:'Итого',title:'Итого с наценкой (цена × остаток)'},{t:'',title:''}
+  const cols=[
+    {key:'name',t:'Товар',title:'Товар'},
+    {key:'warehouse',t:'Склад',title:'Склад'},
+    {key:'date',t:'Партия',title:'Партия — дата и поставщик поставки'},
+    {key:'stock',t:'Ост.',title:'Остаток на складе'},
+    {key:'cost',t:'Себес.',title:'Себестоимость за единицу'},
+    {key:'sum',t:'Закуп',title:'Сумма по себестоимости (себестоимость × остаток)'},
+    {key:'markup',t:'Нц.',title:'Наценка, % (целое число)'},
+    {key:'price',t:'Цена',title:'Цена с наценкой за единицу'},
+    {key:'total',t:'Итого',title:'Итого с наценкой (цена × остаток)'},
+    {key:'',t:'',title:''}
   ];
-  tr.innerHTML=labels.map(x=>`<th title="${x.title}">${x.t}</th>`).join('');
+  tr.innerHTML=cols.map(c=>{
+    if(!c.key)return `<th></th>`;
+    const arrow=stockSort.key===c.key?(stockSort.dir==='asc'?' ▲':' ▼'):'';
+    return `<th data-sort="${c.key}" title="${c.title} (клик — сортировка)" style="cursor:pointer;user-select:none">${c.t}${arrow}</th>`;
+  }).join('');
+  tr.querySelectorAll('[data-sort]').forEach(th=>th.onclick=()=>{
+    const k=th.dataset.sort;
+    if(stockSort.key===k)stockSort.dir=stockSort.dir==='asc'?'desc':'asc';
+    else{stockSort.key=k;stockSort.dir='asc'}
+    decorateStock();
+  });
   const q=normalizeSearch(stockFilter);
   const tokens=q?q.split(' ').filter(Boolean):[];
-  const list=tokens.length?db.products.filter(p=>{
+  const filtered=tokens.length?db.products.filter(p=>{
     const hay=normalizeSearch([p.name,p.pack,p.packWeight].filter(Boolean).join(' '));
     return tokens.every(t=>hay.includes(t));
-  }):db.products;
+  }):db.products.slice();
+  const key=stockSort.key,dir=stockSort.dir==='asc'?1:-1;
+  const getVal=p=>{
+    switch(key){
+      case 'name':return (p.name||'').toLowerCase();
+      case 'warehouse':return (p.warehouse||'').toLowerCase();
+      case 'date':{const d=parseDateValue(p.deliveryDate);return d?d.getTime():0}
+      case 'stock':return +p.stock||0;
+      case 'cost':return +p.cost||0;
+      case 'sum':return (+p.cost||0)*(+p.stock||0);
+      case 'markup':return +p.markup||0;
+      case 'price':return (+p.cost||0)*(1+(+p.markup||0)/100);
+      case 'total':return (+p.cost||0)*(1+(+p.markup||0)/100)*(+p.stock||0);
+      default:return 0;
+    }
+  };
+  const list=filtered.slice().sort((a,b)=>{
+    const va=getVal(a),vb=getVal(b);
+    if(typeof va==='string'&&typeof vb==='string')return va.localeCompare(vb,'ru')*dir;
+    return (va-vb)*dir;
+  });
   const tbody=table.querySelector('tbody');
   if(!list.length){tbody.innerHTML=`<tr><td colspan="10"><div class="empty"><div class="empty-icon">◫</div><div class="card-subtitle">${tokens.length?'Ничего не найдено':'Остатков пока нет'}</div></div></td></tr>`;return}
   tbody.innerHTML=list.map(p=>{
@@ -486,6 +577,16 @@ function decorateStock(){
     input.addEventListener('blur',()=>{input.value=Math.round(+input.value||0)});
   });
   tbody.querySelectorAll('.sell-stock').forEach(b=>b.onclick=()=>openSaleModal(db.products[+b.dataset.stockIndex]));
+}
+function decorateStats(){
+  const preset=document.getElementById('statsPreset');
+  if(preset){
+    preset.onchange=()=>{statsFilter.preset=preset.value;render()};
+  }
+  const from=document.getElementById('statsFrom');
+  if(from)from.onchange=()=>{statsFilter.from=from.value;render()};
+  const to=document.getElementById('statsTo');
+  if(to)to.onchange=()=>{statsFilter.to=to.value;render()};
 }
 function showDeliveryItems(id){
   const d=db.deliveries.find(x=>String(x.id)===String(id));if(!d)return;
@@ -682,6 +783,7 @@ render=()=>{
   }
   if(db.page==='deliveries')decorateDeliveryActions();
   if(db.page==='writeoffs')decorateWriteoffs();
+  if(db.page==='stats')decorateStats();
 };
 (async()=>{
   const hash=String(location.hash||'');
