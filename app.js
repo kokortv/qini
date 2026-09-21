@@ -11,7 +11,6 @@ try{
     console.log('[qini] local data reset');
   }
 }catch(e){}
-// Пустая база. Все данные приходят только с сервера (или через оффлайн-режим).
 const emptyDb={auth:{login:'admin',password:'admin123',name:'Администратор',phone:''},page:'overview',users:[],suppliers:[],warehouses:[],accounts:[],deliveries:[],writeoffs:[],products:[],sales:[]};
 let db=JSON.parse(localStorage.getItem(DB_KEY)||'null')||JSON.parse(JSON.stringify(emptyDb));
 db.auth={...emptyDb.auth,...(db.auth||{})};
@@ -196,7 +195,14 @@ function statsPage(){
   const sales=db.sales||[];
   const total=sales.reduce((a,s)=>a+(Number(s.total)||0),0);
   const profit=sales.reduce((a,s)=>a+(Number(s.profit)||0),0);
-  return `<div class="kpi-grid"><div class="kpi"><div class="kpi-top">Сумма всех продаж</div><div class="kpi-value retail-amount">${money(total)}</div><div class="kpi-note muted">${sales.length} ${sales.length===1?'продажа':'продаж'}</div></div><div class="kpi"><div class="kpi-top">Общий заработок</div><div class="kpi-value profit-amount">${money(profit)}</div><div class="kpi-note muted">Продажи минус себестоимость</div></div></div><div class="card"><div class="card-head"><div><h3 class="card-title">Статистика продаж</h3><div class="card-subtitle">Каждая продажа отдельной строкой</div></div><select class="select" style="max-width:180px"><option>Все время</option><option>Сегодня</option><option>Неделя</option><option>Месяц</option></select></div>${sales.length?`<div class="table-wrap"><table class="table"><thead><tr><th>Дата и время</th><th>Товар</th><th>Фасовка</th><th>Количество</th><th>Наценка</th><th>Сумма продажи</th><th>Заработано</th><th>Комментарий</th>${session.role==='admin'?'<th>Действия</th>':''}</tr></thead><tbody>${sales.map(s=>`<tr><td>${displayDate(s.date)}</td><td>${esc(s.productName||'')}</td><td>${esc(s.pack||'')}</td><td>${s.qty||0}</td><td>${fmtPct(s.markup)}</td><td class="retail-amount">${money(s.total)}</td><td class="profit-amount">${money(s.profit)}</td><td>${esc(s.comment||'')}</td>${session.role==='admin'?`<td><button class="action-btn danger" data-delete="sales:${s.id}">⌫</button></td>`:''}</tr>`).join('')}</tbody></table></div>`:'<div class="empty"><div class="empty-icon">◔</div><h3 class="card-title">Продаж пока нет</h3><div class="card-subtitle">Добавьте продажу из раздела «Остатки»</div></div>'}</div>`;
+  const isCash=s=>(s.payment||'').toLowerCase().includes('нал');
+  const isCard=s=>(s.payment||'').toLowerCase().includes('карт');
+  const cashTotal=sales.filter(isCash).reduce((a,s)=>a+(Number(s.total)||0),0);
+  const cardTotal=sales.filter(isCard).reduce((a,s)=>a+(Number(s.total)||0),0);
+  const cashCount=sales.filter(isCash).length;
+  const cardCount=sales.filter(isCard).length;
+  const paymentLabel=v=>v?v:'—';
+  return `<div class="kpi-grid"><div class="kpi"><div class="kpi-top">Сумма всех продаж</div><div class="kpi-value retail-amount">${money(total)}</div><div class="kpi-note muted">${sales.length} ${sales.length===1?'продажа':'продаж'}</div></div><div class="kpi"><div class="kpi-top">Общий заработок</div><div class="kpi-value profit-amount">${money(profit)}</div><div class="kpi-note muted">Продажи минус себестоимость</div></div><div class="kpi"><div class="kpi-top">Оплачено наличными</div><div class="kpi-value">${money(cashTotal)}</div><div class="kpi-note muted">${cashCount} ${cashCount===1?'продажа':'продаж'}</div></div><div class="kpi"><div class="kpi-top">Оплачено картой</div><div class="kpi-value">${money(cardTotal)}</div><div class="kpi-note muted">${cardCount} ${cardCount===1?'продажа':'продаж'}</div></div></div><div class="card"><div class="card-head"><div><h3 class="card-title">Статистика продаж</h3><div class="card-subtitle">Каждая продажа отдельной строкой</div></div><select class="select" style="max-width:180px"><option>Все время</option><option>Сегодня</option><option>Неделя</option><option>Месяц</option></select></div>${sales.length?`<div class="table-wrap"><table class="table"><thead><tr><th>Дата и время</th><th>Товар</th><th>Фасовка</th><th>Количество</th><th>Наценка</th><th>Оплата</th><th>Сумма продажи</th><th>Заработано</th><th>Комментарий</th>${session.role==='admin'?'<th>Действия</th>':''}</tr></thead><tbody>${sales.map(s=>`<tr><td>${displayDate(s.date)}</td><td>${esc(s.productName||'')}</td><td>${esc(s.pack||'')}</td><td>${s.qty||0}</td><td>${fmtPct(s.markup)}</td><td>${esc(paymentLabel(s.payment))}</td><td class="retail-amount">${money(s.total)}</td><td class="profit-amount">${money(s.profit)}</td><td>${esc(s.comment||'')}</td>${session.role==='admin'?`<td><button class="action-btn danger" data-delete="sales:${s.id}">⌫</button></td>`:''}</tr>`).join('')}</tbody></table></div>`:'<div class="empty"><div class="empty-icon">◔</div><h3 class="card-title">Продаж пока нет</h3><div class="card-subtitle">Добавьте продажу из раздела «Остатки»</div></div>'}</div>`;
 }
 function page(){
   if(db.page==='overview')return overview();
@@ -432,12 +438,7 @@ function normalizeSearch(s){
   try{
     return String(s||'')
       .normalize('NFKC')
-      // Скрытые символы, которые надо вырезать без замены на пробел:
-      // 00AD мягкий перенос, 200B..200F zero-width/LRM/RLM,
-      // 2028/2029 разделители строк, 202F узкий NBSP, 205F мат.пробел,
-      // 2060 word joiner, FEFF BOM
       .replace(/[\u00AD\u200B-\u200F\u2028\u2029\u202F\u205F\u2060\uFEFF]/g,'')
-      // NBSP и обычные пробелы → обычный пробел
       .replace(/[\u00A0\u1680\u2000-\u200A\u3000]/g,' ')
       .toLowerCase()
       .replace(/ё/g,'е')
@@ -464,9 +465,6 @@ function decorateStock(){
     const hay=normalizeSearch([p.name,p.pack,p.packWeight].filter(Boolean).join(' '));
     return tokens.every(t=>hay.includes(t));
   }):db.products;
-  if(tokens.length&&!list.length){
-    console.log('[qini] поиск не дал результатов. Запрос:',q,'| Что ищем:',tokens,'| Все товары:',db.products.map(p=>({name:p.name,pack:p.pack,packWeight:p.packWeight})));
-  }
   const tbody=table.querySelector('tbody');
   if(!list.length){tbody.innerHTML=`<tr><td colspan="10"><div class="empty"><div class="empty-icon">◫</div><div class="card-subtitle">${tokens.length?'Ничего не найдено':'Остатков пока нет'}</div></div></td></tr>`;return}
   tbody.innerHTML=list.map(p=>{
@@ -542,7 +540,7 @@ async function deleteRecord(type,id){
 function openSaleModal(p){
   const accountId=db.warehouses.find(w=>w.name===p.warehouse)?.accountId||'';
   const deliveryInfo=p.deliveryDate?`Поставка: ${displayDate(p.deliveryDate)}${p.supplier?' · '+esc(p.supplier):''}`:'Партия без поставки';
-  document.body.insertAdjacentHTML('beforeend',`<div class="modal-backdrop" id="saleModal"><div class="modal"><div class="modal-head"><div><h2 class="modal-title">Продажа товара</h2><div class="modal-desc">${esc(p.name)} · ${esc(p.pack)} · ${esc(p.warehouse||'')} · ${deliveryInfo}</div></div><button class="close" id="closeSale">×</button></div><form class="form" id="saleForm"><div class="form-grid"><div class="field"><label class="label">Дата и время</label><input class="input" name="date" type="datetime-local" value="${nowLocal()}" required></div><div class="field"><label class="label">Количество</label><input class="input" name="qty" type="number" min="0.01" step="any" max="${p.stock}" required></div><div class="field"><label class="label">Наценка, %</label><input class="input" name="markup" type="number" min="0" step="1" value="${Math.round(p.markup||0)}" required></div><div class="field"><label class="label">Цена продажи за единицу</label><input class="input" name="unitPrice" type="number" step="any" value="${(p.cost*(1+Math.round(p.markup||0)/100)).toFixed(2)}" required></div><div class="field full"><label class="label">Комментарий</label><input class="input" name="comment" placeholder="Необязательно"></div></div><div class="summary-row"><div><div class="summary-label">Сумма продажи</div><div class="summary-value retail-amount" id="saleTotal">0</div></div><div><div class="summary-label">Заработано</div><div class="summary-value profit-amount" id="saleProfit">0</div></div></div><div class="modal-foot"><button type="button" class="btn btn-light" id="closeSale2">Отмена</button><button class="btn btn-primary">Добавить продажу</button></div></form></div></div>`);
+  document.body.insertAdjacentHTML('beforeend',`<div class="modal-backdrop" id="saleModal"><div class="modal"><div class="modal-head"><div><h2 class="modal-title">Продажа товара</h2><div class="modal-desc">${esc(p.name)} · ${esc(p.pack)} · ${esc(p.warehouse||'')} · ${deliveryInfo}</div></div><button class="close" id="closeSale">×</button></div><form class="form" id="saleForm"><div class="form-grid"><div class="field"><label class="label">Дата и время</label><input class="input" name="date" type="datetime-local" value="${nowLocal()}" required></div><div class="field"><label class="label">Количество</label><input class="input" name="qty" type="number" min="0.01" step="any" max="${p.stock}" required></div><div class="field"><label class="label">Наценка, %</label><input class="input" name="markup" type="number" min="0" step="1" value="${Math.round(p.markup||0)}" required></div><div class="field"><label class="label">Цена продажи за единицу</label><input class="input" name="unitPrice" type="number" step="any" value="${(p.cost*(1+Math.round(p.markup||0)/100)).toFixed(2)}" required></div><div class="field"><label class="label">Оплата</label><select class="select" name="payment" required><option>Наличные</option><option>Карта</option></select></div><div class="field full"><label class="label">Комментарий</label><input class="input" name="comment" placeholder="Необязательно"></div></div><div class="summary-row"><div><div class="summary-label">Сумма продажи</div><div class="summary-value retail-amount" id="saleTotal">0</div></div><div><div class="summary-label">Заработано</div><div class="summary-value profit-amount" id="saleProfit">0</div></div></div><div class="modal-foot"><button type="button" class="btn btn-light" id="closeSale2">Отмена</button><button class="btn btn-primary">Добавить продажу</button></div></form></div></div>`);
   const close=()=>el('#saleModal')?.remove();
   el('#closeSale').onclick=close;
   el('#closeSale2').onclick=close;
@@ -561,7 +559,7 @@ function openSaleModal(p){
     e.preventDefault();
     const q=+f.qty.value,price=+f.unitPrice.value,markup=Math.round(+f.markup.value||0),total=q*price,submit=e.submitter;
     if(submit){submit.disabled=true;submit.classList.add('is-loading');submit.innerHTML='<span class="spinner"></span> Сохраняем…'}
-    const data={date:f.date.value,warehouseId:db.warehouses.find(w=>w.name===p.warehouse)?.id||'',accountId,productName:p.name,pack:p.pack,qty:q,markup,unitPrice:price,cost:p.cost,total,profit:q*(price-p.cost),sellerId:session.userId||'',deliveryId:p.deliveryId||'',comment:(f.comment?.value||'').trim()};
+    const data={date:f.date.value,warehouseId:db.warehouses.find(w=>w.name===p.warehouse)?.id||'',accountId,productName:p.name,pack:p.pack,qty:q,markup,unitPrice:price,cost:p.cost,total,profit:q*(price-p.cost),sellerId:session.userId||'',deliveryId:p.deliveryId||'',comment:(f.comment?.value||'').trim(),payment:(f.payment?.value||'Наличные')};
     const r=await api('create','Sales',data);
     if(API_URL&&!r.ok){if(submit){submit.disabled=false;submit.classList.remove('is-loading');submit.textContent='Добавить продажу'}toast('Ошибка сохранения: '+r.error);return}
     const newId=(r&&r.data&&r.data.id)||data.id||('sale'+Date.now());
